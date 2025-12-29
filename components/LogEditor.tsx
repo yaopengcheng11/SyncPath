@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { WorkLog, Goal, LogLevel } from '../types';
 import { getDisplayWeekRange } from '../utils/dateUtils';
-import { summarizeWork, suggestGoals } from '../services/geminiService';
 
 interface LogEditorProps {
   dateStr: string;
@@ -59,28 +58,6 @@ const LogEditor: React.FC<LogEditorProps> = ({ dateStr, initialLog, initialLevel
       createdAt: initialLog?.createdAt || Date.now(),
       updatedAt: Date.now() // Always update timestamp on save
     });
-  };
-
-  const handleAISummarize = async () => {
-    if (readOnly) return;
-    setIsSummarizing(true);
-    const result = await summarizeWork(goals, notes);
-    setSummary(result);
-    setIsSummarizing(false);
-  };
-
-  const handleAISuggest = async () => {
-    if (readOnly) return;
-    setIsSuggesting(true);
-    const suggestions = await suggestGoals(notes || "general team work");
-    const newGoals: Goal[] = suggestions.map(s => ({
-      id: Math.random().toString(36).substr(2, 9),
-      title: s.title || 'New Goal',
-      description: s.description || '',
-      status: 'pending'
-    }));
-    setGoals([...goals, ...newGoals]);
-    setIsSuggesting(false);
   };
 
   const levelInfo = {
@@ -173,14 +150,6 @@ const LogEditor: React.FC<LogEditorProps> = ({ dateStr, initialLog, initialLevel
               </h3>
               {!readOnly && (
                 <div className="flex gap-2">
-                   <button 
-                    onClick={handleAISuggest}
-                    disabled={isSuggesting}
-                    className="text-[9px] font-black uppercase text-indigo-600 px-3 py-1.5 rounded hover:bg-indigo-50 disabled:opacity-50"
-                  >
-                    {isSuggesting ? <i className="fas fa-spinner fa-spin mr-1"></i> : <i className="fas fa-magic mr-1"></i>}
-                    AI Assist
-                  </button>
                   <button 
                     onClick={handleAddGoal}
                     className="text-[9px] font-black uppercase text-slate-600 px-3 py-1.5 rounded hover:bg-slate-100"
@@ -256,15 +225,6 @@ const LogEditor: React.FC<LogEditorProps> = ({ dateStr, initialLog, initialLevel
                   <span className={`w-1.5 h-1.5 rounded-full ${level === 1 ? 'bg-amber-400' : 'bg-indigo-500'}`}></span>
                   Overview
                 </h3>
-                {!readOnly && (
-                  <button 
-                    onClick={handleAISummarize}
-                    disabled={isSummarizing || goals.length === 0}
-                    className="text-[9px] font-black uppercase text-indigo-500 hover:text-indigo-700 disabled:opacity-30"
-                  >
-                    Draft Summary
-                  </button>
-                )}
               </div>
               <textarea 
                 value={summary}

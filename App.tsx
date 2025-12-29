@@ -4,7 +4,6 @@ import Timeline from './components/Timeline';
 import LogEditor from './components/LogEditor';
 import MultiTimelineView from './components/MultiTimelineView';
 import { useLiveCollaboration } from './hooks/useLiveCollaboration';
-import { generateRoadmap } from './services/geminiService';
 import { getStartOfWeek, formatDate, parseSafeDate } from './utils/dateUtils';
 
 const PROJECT_COLORS = ['#6366f1', '#ec4899', '#8b5cf6', '#10b981', '#f59e0b', '#3b82f6'];
@@ -301,37 +300,37 @@ const App: React.FC = () => {
     // AI Generation Logic
     if (newProj.description) {
       try {
-        const aiLogsRaw = await generateRoadmap(newProj.description, newProj.startDate!, newProj.endDate!);
+        // const aiLogsRaw = await generateRoadmap(newProj.description, newProj.startDate!, newProj.endDate!);
         
-        // Transform AI logs to WorkLog format and bucket by date
-        aiLogsRaw.forEach((rawLog) => {
-          // Normalize date to start of week (Monday) to match timeline bucketing
-          const dateObj = parseSafeDate(rawLog.date);
-          const weekStart = getStartOfWeek(dateObj);
-          const dateBucket = formatDate(weekStart);
+        // // Transform AI logs to WorkLog format and bucket by date
+        // aiLogsRaw.forEach((rawLog) => {
+        //   // Normalize date to start of week (Monday) to match timeline bucketing
+        //   const dateObj = parseSafeDate(rawLog.date);
+        //   const weekStart = getStartOfWeek(dateObj);
+        //   const dateBucket = formatDate(weekStart);
 
-          const newLog: WorkLog = {
-            id: Math.random().toString(36).substr(2, 9),
-            author: rawLog.author || 'AI',
-            level: (rawLog.level as LogLevel) || 3,
-            weekStartDate: dateBucket,
-            summary: rawLog.summary,
-            notes: `Generated from: ${rawLog.date}`,
-            goals: rawLog.goals.map((gStr) => ({
-              id: Math.random().toString(36).substr(2, 9),
-              title: gStr,
-              status: 'pending',
-              description: ''
-            })),
-            createdAt: Date.now(),
-            updatedAt: Date.now()
-          };
+        //   const newLog: WorkLog = {
+        //     id: Math.random().toString(36).substr(2, 9),
+        //     author: rawLog.author || 'AI',
+        //     level: (rawLog.level as LogLevel) || 3,
+        //     weekStartDate: dateBucket,
+        //     summary: rawLog.summary,
+        //     notes: `Generated from: ${rawLog.date}`,
+        //     goals: rawLog.goals.map((gStr) => ({
+        //       id: Math.random().toString(36).substr(2, 9),
+        //       title: gStr,
+        //       status: 'pending',
+        //       description: ''
+        //     })),
+        //     createdAt: Date.now(),
+        //     updatedAt: Date.now()
+        //   };
 
-          if (!generatedLogs[dateBucket]) {
-            generatedLogs[dateBucket] = [];
-          }
-          generatedLogs[dateBucket].push(newLog);
-        });
+        //   if (!generatedLogs[dateBucket]) {
+        //     generatedLogs[dateBucket] = [];
+        //   }
+        //   generatedLogs[dateBucket].push(newLog);
+        // });
       } catch (error) {
         console.error("AI Generation failed", error);
         // Continue creating project without logs

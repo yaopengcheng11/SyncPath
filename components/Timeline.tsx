@@ -872,7 +872,7 @@ const Timeline: React.FC<TimelineProps> = ({
                 return (
                 <div key={marker.dateStr} className="absolute bottom-0 flex flex-col items-center pointer-events-none" style={{ left: `${marker.pos}%`, transform: 'translateX(-50%)', zIndex: wrapperZIndex }}>
                   <div className="flex flex-col-reverse items-center pointer-events-auto">
-                    {marker.logList.map((log, logIdx) => {
+                    {marker.logList.map((log: any, logIdx: number) => {
                       const isSelected = selectedLogIds.has(log.id);
                       const isPast = marker.isPast;
                       const isLocked = !!log.isLocked || lockedLevels[log.level];
