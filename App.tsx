@@ -36,6 +36,7 @@ const App: React.FC = () => {
   const [pendingLogLevel, setPendingLogLevel] = useState<LogLevel>(3);
   const [showConnectModal, setShowConnectModal] = useState(false);
   const [roomInput, setRoomInput] = useState('');
+  const [showExportSelector, setShowExportSelector] = useState(false);
   
   // New Project State
   const [newProj, setNewProj] = useState<Partial<Project>>({
@@ -211,19 +212,19 @@ const App: React.FC = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [undo, redo]);
 
-  const handleExportData = () => {
+  const executeJSONExport = (targetProjectId: string | null) => {
     let exportState = state;
     let filename = `syncpath_backup_${new Date().toISOString().slice(0, 10)}.json`;
 
-    // Export only specific project if currently in timeline view
-    if (state.view === 'timeline' && state.selectedProjectId) {
-      const currentProject = state.projects.find(p => p.id === state.selectedProjectId);
+    // Export specific project
+    if (targetProjectId) {
+      const currentProject = state.projects.find(p => p.id === targetProjectId);
       if (currentProject) {
         exportState = {
           ...state,
           projects: [currentProject],
           logs: { [currentProject.id]: state.logs[currentProject.id] || {} },
-          // Clear unnecessary context for single project export if desired, but keeping structure valid
+          // When importing a single project back, having selectedProjectId ensures context is clear
           selectedProjectId: currentProject.id,
           view: 'timeline'
         };
@@ -239,6 +240,7 @@ const App: React.FC = () => {
     document.body.appendChild(downloadAnchorNode);
     downloadAnchorNode.click();
     downloadAnchorNode.remove();
+    setShowExportSelector(false);
   };
 
   const handleImportClick = () => {
@@ -423,6 +425,32 @@ const App: React.FC = () => {
       return { ...prev, logs: { ...prev.logs, [projectId]: projectLogs } };
     });
   };
+  
+  const handleCopyLog = (logId: string, oldDate: string, newDate: string) => {
+    if (!state.selectedProjectId) return;
+    modifyState(prev => {
+      const projectId = prev.selectedProjectId!;
+      const projectLogs = { ...prev.logs[projectId] };
+      const logToCopy = projectLogs[oldDate]?.find(l => l.id === logId);
+      if (!logToCopy) return prev;
+      
+      // Deep Copy Logic
+      const newLog: WorkLog = {
+        ...logToCopy,
+        id: Math.random().toString(36).substr(2, 9),
+        weekStartDate: newDate,
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        goals: logToCopy.goals.map(g => ({
+          ...g,
+          id: Math.random().toString(36).substr(2, 9)
+        }))
+      };
+
+      projectLogs[newDate] = [...(projectLogs[newDate] || []), newLog];
+      return { ...prev, logs: { ...prev.logs, [projectId]: projectLogs } };
+    });
+  };
 
   const handleDeleteLog = useCallback((logId: string, dateStr: string) => {
     if (!state.selectedProjectId) return;
@@ -437,6 +465,25 @@ const App: React.FC = () => {
         return { ...prev, logs: currentAllLogs, activeLogId: null, activeLogDate: null };
       }
       return prev;
+    });
+  }, [state.selectedProjectId, modifyState]);
+
+  const handleToggleLock = useCallback((logId: string, dateStr: string) => {
+    if (!state.selectedProjectId) return;
+    modifyState(prev => {
+      const projectId = prev.selectedProjectId!;
+      const projectLogs = { ...prev.logs[projectId] };
+      if (!projectLogs[dateStr]) return prev;
+      
+      const logIndex = projectLogs[dateStr].findIndex(l => l.id === logId);
+      if (logIndex === -1) return prev;
+
+      const updatedLog = { ...projectLogs[dateStr][logIndex], isLocked: !projectLogs[dateStr][logIndex].isLocked };
+      const newDateLogs = [...projectLogs[dateStr]];
+      newDateLogs[logIndex] = updatedLog;
+      
+      projectLogs[dateStr] = newDateLogs;
+      return { ...prev, logs: { ...prev.logs, [projectId]: projectLogs } };
     });
   }, [state.selectedProjectId, modifyState]);
 
@@ -482,6 +529,64 @@ const App: React.FC = () => {
                <button onClick={() => setShowConnectModal(false)} className="px-6 py-3 text-slate-400 font-black text-[10px] uppercase tracking-widest hover:bg-slate-50 rounded-xl transition-all">Cancel</button>
              </div>
            </div>
+        </div>
+      )}
+
+      {/* Export Selector Modal */}
+      {showExportSelector && (
+        <div 
+          className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-[100] flex items-center justify-center animate-in fade-in duration-200"
+          onClick={() => setShowExportSelector(false)}
+        >
+          <div 
+            className="bg-white rounded-[2.5rem] shadow-2xl max-w-lg w-full overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-10">
+              <h3 className="text-2xl font-black text-slate-800 mb-2">Export Data</h3>
+              <p className="text-slate-400 text-xs font-bold uppercase tracking-widest mb-8">Select project to export as JSON</p>
+
+              <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2">
+                {/* Full Backup Option */}
+                <button 
+                  onClick={() => executeJSONExport(null)}
+                  className="w-full text-left p-4 rounded-2xl bg-slate-50 hover:bg-indigo-50 border border-slate-100 hover:border-indigo-100 transition-all group flex items-center gap-4"
+                >
+                   <div className="w-10 h-10 rounded-xl bg-slate-200 group-hover:bg-indigo-200 flex items-center justify-center text-slate-500 group-hover:text-indigo-600 transition-colors">
+                     <i className="fas fa-database"></i>
+                   </div>
+                   <div>
+                     <h4 className="font-black text-slate-800 text-sm">Full System Backup</h4>
+                     <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wide">All Projects & Settings</p>
+                   </div>
+                </button>
+
+                <div className="h-px bg-slate-100 my-4"></div>
+
+                {state.projects.length === 0 && (
+                   <p className="text-center text-slate-400 text-xs py-4">No individual projects available.</p>
+                )}
+
+                {state.projects.map(p => (
+                   <button 
+                    key={p.id}
+                    onClick={() => executeJSONExport(p.id)}
+                    className="w-full text-left p-4 rounded-2xl hover:bg-slate-50 border border-transparent hover:border-slate-100 transition-all flex items-center gap-4"
+                  >
+                     <div className="w-3 h-10 rounded-full" style={{ backgroundColor: p.color }}></div>
+                     <div>
+                       <h4 className="font-black text-slate-800 text-sm leading-tight">{p.name}</h4>
+                       <p className="text-[9px] text-slate-400 font-bold uppercase tracking-wide">{p.personnel}</p>
+                     </div>
+                     <i className="fas fa-download ml-auto text-slate-300"></i>
+                  </button>
+                ))}
+              </div>
+            </div>
+            <div className="bg-slate-50 p-6 flex justify-end">
+               <button onClick={() => setShowExportSelector(false)} className="px-6 py-3 text-slate-400 font-black text-[10px] uppercase tracking-widest hover:text-slate-600 transition-all">Cancel</button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -540,7 +645,7 @@ const App: React.FC = () => {
             </button>
 
             <div className="flex items-center gap-2">
-              <button onClick={handleExportData} className="w-10 h-10 rounded-full border border-slate-200 flex items-center justify-center text-slate-500 hover:bg-slate-50 transition-all" title="Export Data"><i className="fas fa-file-arrow-down"></i></button>
+              <button onClick={() => setShowExportSelector(true)} className="w-10 h-10 rounded-full border border-slate-200 flex items-center justify-center text-slate-500 hover:bg-slate-50 transition-all" title="Export Data"><i className="fas fa-file-arrow-down"></i></button>
               {isAdmin && (
                 <button onClick={handleImportClick} className="w-10 h-10 rounded-full border border-slate-200 flex items-center justify-center text-slate-500 hover:bg-slate-50 transition-all group relative" title="Merge Data">
                   <i className="fas fa-file-arrow-up group-hover:text-indigo-600"></i>
@@ -621,7 +726,9 @@ const App: React.FC = () => {
             project={activeProject} 
             onSelectDate={handleSelectDate} 
             onMoveLog={handleMoveLog} 
+            onCopyLog={handleCopyLog}
             onDeleteLog={handleDeleteLog} 
+            onToggleLock={handleToggleLock}
             onUpdateProject={(updates) => handleUpdateProject(activeProject.id, updates)}
             readOnly={!isAdmin} 
           />

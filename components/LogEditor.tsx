@@ -149,7 +149,7 @@ const LogEditor: React.FC<LogEditorProps> = ({ dateStr, initialLog, initialLevel
             <section className="bg-slate-50 p-6 rounded-2xl border border-slate-100">
               <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3">Collaborator Identity</label>
               <div className="flex items-center gap-4">
-                <div className={`w-10 h-10 rounded-full flex items-center justify-center font-black transition-colors ${level === 1 ? 'bg-amber-400 text-slate-900' : 'bg-indigo-100 text-indigo-600'}`}>
+                <div className={`w-10 h-10 rounded-full flex items-center justify-center font-black transition-colors ${level === 1 ? 'bg-amber-400 text-slate-900' : level === 2 ? 'bg-indigo-100 text-indigo-600' : 'bg-indigo-100 text-indigo-600'}`}>
                   {author ? author.charAt(0).toUpperCase() : '?'}
                 </div>
                 <input 

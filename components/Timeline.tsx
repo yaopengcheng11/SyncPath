@@ -8,6 +8,7 @@ interface TimelineProps {
   project: Project;
   onSelectDate: (dateStr: string, logId?: string, level?: LogLevel) => void;
   onMoveLog?: (logId: string, oldDate: string, newDate: string) => void;
+  onCopyLog?: (logId: string, fromDate: string, toDate: string) => void;
   onUpdateProject?: (updates: Partial<Project>) => void;
   onDeleteLog?: (logId: string, dateStr: string) => void;
   onToggleLock?: (logId: string, dateStr: string) => void;
@@ -18,10 +19,18 @@ interface TimelineProps {
 
 // Drag State Interface
 interface DragState {
-  id: string;
+  id: string; // The specific log being dragged (the "leader")
   oldDate: string;
   level: LogLevel;
   isLocked: boolean;
+  isCloning: boolean; // Track if we are copying
+}
+
+interface SelectionBox {
+  startX: number;
+  startY: number;
+  currentX: number;
+  currentY: number;
 }
 
 const Timeline: React.FC<TimelineProps> = ({ 
@@ -29,6 +38,7 @@ const Timeline: React.FC<TimelineProps> = ({
   project, 
   onSelectDate, 
   onMoveLog, 
+  onCopyLog,
   onUpdateProject, 
   onDeleteLog, 
   onToggleLock, 
@@ -38,7 +48,16 @@ const Timeline: React.FC<TimelineProps> = ({
 }) => {
   const [selectedDate, setSelectedDate] = useState<string | null>(null);
   const [selectedPercentage, setSelectedPercentage] = useState<number | null>(null);
-  const [activeLogId, setActiveLogId] = useState<string | null>(null);
+  
+  // Selection State
+  const [selectedLogIds, setSelectedLogIds] = useState<Set<string>>(new Set());
+  const [hoveredLogId, setHoveredLogId] = useState<string | null>(null);
+  const [selectionBox, setSelectionBox] = useState<SelectionBox | null>(null);
+
+  // Hover Tooltip Ref (for smoother performance without re-renders)
+  const tooltipRef = useRef<HTMLDivElement>(null);
+  const tooltipTextRef = useRef<HTMLDivElement>(null);
+
   const [showLevelMenu, setShowLevelMenu] = useState(false);
   const [showProjectSettings, setShowProjectSettings] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
@@ -58,6 +77,10 @@ const Timeline: React.FC<TimelineProps> = ({
   const [hasMovedEnough, setHasMovedEnough] = useState(false);
   const [deleteDirection, setDeleteDirection] = useState<'left' | 'right' | null>(null);
   
+  // Real-time feedback state
+  const [dragGhostPos, setDragGhostPos] = useState<number | null>(null); 
+  const [dragCurrentDate, setDragCurrentDate] = useState<string | null>(null);
+  
   // Visibility State
   const [visibleLevels, setVisibleLevels] = useState<Record<LogLevel, boolean>>({
     1: true,
@@ -75,6 +98,7 @@ const Timeline: React.FC<TimelineProps> = ({
   const containerRef = useRef<HTMLDivElement>(null);
   const captureRef = useRef<HTMLDivElement>(null); 
   const lastMousePos = useRef({ x: 0, y: 0 });
+  const ignoreClickRef = useRef(false);
   
   // Track mount state for autoScale logic
   const mounted = useRef(false);
@@ -125,8 +149,6 @@ const Timeline: React.FC<TimelineProps> = ({
   const skylineHeight = 400 + (Math.max(0, ...logMarkers.map(m => m.logList.length)) * 40);
   
   // Adaptive Height Calculation
-  // In Multi-View (autoScale=true), we want a tighter height to allow the content to zoom in more within the card.
-  // In Single-View (autoScale=false), we want more vertical breathing room (900 min).
   const adaptiveHeight = Math.max(
     autoScale ? 600 : 900, 
     skylineHeight + (autoScale ? 200 : 350)
@@ -137,27 +159,19 @@ const Timeline: React.FC<TimelineProps> = ({
     if (!captureRef.current) return;
     const { width: parentWidth, height: parentHeight } = captureRef.current.getBoundingClientRect();
     
-    // Determine actual content width. 
-    // In Single View (autoScale=false), width is 100% of parent, so we must measure offsetWidth.
-    // In Multi View (autoScale=true), width is fixed at 1400px.
     const inner = captureRef.current.querySelector('[data-inner-container="true"]') as HTMLElement;
     const contentWidth = inner ? inner.offsetWidth : 1400;
     const contentHeight = adaptiveHeight;
     
-    // Padding logic:
-    // Single View (autoScale=false): Generous padding (200px/150px) for aesthetics.
-    // Multi View (autoScale=true): Minimal padding (40px) to maximize content visibility in small cards.
     const paddingX = autoScale ? 40 : 200;
     const paddingY = autoScale ? 40 : 150;
 
-    // Use max to prevent division issues on very small screens
     const safeParentWidth = Math.max(parentWidth, paddingX + 20);
     const safeParentHeight = Math.max(parentHeight, paddingY + 20);
 
     const scaleX = (safeParentWidth - paddingX) / contentWidth;
     const scaleY = (safeParentHeight - paddingY) / contentHeight;
 
-    // Use the smaller scale to ensure containment
     const fitScale = Math.max(0.1, Math.min(scaleX, scaleY));
     
     setTransform({ x: 0, y: 0, scale: fitScale });
@@ -165,9 +179,6 @@ const Timeline: React.FC<TimelineProps> = ({
 
   // Initial Fit & Auto Scale Logic
   useEffect(() => {
-    // We want to run fitToView on initial mount for ALL modes to ensure proper padding.
-    // If autoScale is true (multi-view), we also want to react to updates.
-    // If autoScale is false (single-view), we only want to run it once on mount to respect subsequent user zooming/panning.
     if (autoScale || !mounted.current) {
         const timer = setTimeout(() => {
             fitToView();
@@ -197,7 +208,78 @@ const Timeline: React.FC<TimelineProps> = ({
     return null;
   }, []);
 
+  // --- Interaction Handlers ---
+
+  const handleContainerMouseDown = useCallback((e: React.MouseEvent) => {
+    if (isSpacePressed) {
+       setIsPanning(true);
+       lastMousePos.current = { x: e.clientX, y: e.clientY };
+       return;
+    }
+    
+    // Start Box Selection
+    if (!readOnly && e.button === 0 && !draggingLog) {
+      // Clear selection if not holding Shift/Ctrl
+      if (!e.shiftKey && !e.metaKey && !e.ctrlKey) {
+        setSelectedLogIds(new Set());
+      }
+      setSelectionBox({
+        startX: e.clientX,
+        startY: e.clientY,
+        currentX: e.clientX,
+        currentY: e.clientY
+      });
+      // Clear specific date selection
+      setSelectedDate(null); 
+      setSelectedPercentage(null);
+    }
+  }, [isSpacePressed, readOnly, draggingLog]);
+
+  const handleLogMouseDown = useCallback((e: React.MouseEvent, log: WorkLog, dateStr: string) => {
+    e.stopPropagation(); // Prevent container selection start
+    if (readOnly) return;
+
+    if (e.button === 0) {
+      // Multi-select Logic
+      let newSelection = new Set(selectedLogIds);
+      
+      if (e.shiftKey || e.metaKey || e.ctrlKey) {
+        // Toggle selection
+        if (newSelection.has(log.id)) {
+           newSelection.delete(log.id);
+        } else {
+           newSelection.add(log.id);
+        }
+        setSelectedLogIds(newSelection);
+      } else {
+        // If clicking an item that is ALREADY selected, don't clear selection yet (allows bulk drag)
+        // Only clear if clicking a new, unselected item without modifier
+        if (!newSelection.has(log.id)) {
+          newSelection = new Set([log.id]);
+          setSelectedLogIds(newSelection);
+        }
+      }
+
+      // Prepare Drag (only if not locked)
+      const isLocked = !!log.isLocked || lockedLevels[log.level];
+      if (!isLocked) {
+         // Check for Clone Mode (Alt key)
+         const isCloning = e.altKey;
+         
+         setDraggingLog({ 
+           id: log.id, 
+           oldDate: dateStr, 
+           level: log.level, 
+           isLocked: false,
+           isCloning: isCloning
+         });
+         setDragStartPos({ x: e.clientX, y: e.clientY });
+      }
+    }
+  }, [readOnly, selectedLogIds, lockedLevels]);
+
   const handleGlobalMouseMove = useCallback((e: MouseEvent) => {
+    // 1. Panning
     if (isPanning) {
       const dx = e.clientX - lastMousePos.current.x;
       const dy = e.clientY - lastMousePos.current.y;
@@ -206,15 +288,66 @@ const Timeline: React.FC<TimelineProps> = ({
       return;
     }
 
+    // 2. Box Selection
+    if (selectionBox) {
+      setSelectionBox(prev => prev ? { ...prev, currentX: e.clientX, currentY: e.clientY } : null);
+      
+      // Calculate intersection and update selection
+      if (containerRef.current) {
+        const left = Math.min(selectionBox.startX, e.clientX);
+        const top = Math.min(selectionBox.startY, e.clientY);
+        const width = Math.abs(e.clientX - selectionBox.startX);
+        const height = Math.abs(e.clientY - selectionBox.startY);
+
+        const logElements = document.querySelectorAll('[data-log-id]');
+        const newSelected = new Set(e.shiftKey || e.metaKey || e.ctrlKey ? selectedLogIds : []);
+
+        logElements.forEach((el) => {
+          const rect = el.getBoundingClientRect();
+          // Simple AABB collision detection
+          const isOverlapping = 
+            left < rect.right &&
+            left + width > rect.left &&
+            top < rect.bottom &&
+            top + height > rect.top;
+          
+          if (isOverlapping) {
+            const id = el.getAttribute('data-log-id');
+            if (id) newSelected.add(id);
+          }
+        });
+        setSelectedLogIds(newSelected);
+      }
+      return;
+    }
+
+    // 3. Dragging Log(s)
     if (draggingLog && dragStartPos && !readOnly) {
       if (!hasMovedEnough) {
         const dist = Math.sqrt(Math.pow(e.clientX - dragStartPos.x, 2) + Math.pow(e.clientY - dragStartPos.y, 2));
         if (dist > 5) setHasMovedEnough(true);
       }
-      // Check delete zone
-      setDeleteDirection(getDeleteDirection(e.clientX));
+      
+      if (lineRef.current) {
+        const rect = lineRef.current.getBoundingClientRect();
+        
+        // Check delete zone (Copying cannot delete at the same time, only move can delete)
+        const isDelete = !draggingLog.isCloning && (e.clientX < rect.left || e.clientX > rect.right);
+        const newDeleteDirection = isDelete ? (e.clientX < rect.left ? 'left' : 'right') : null;
+        setDeleteDirection(newDeleteDirection);
+
+        // Calculate Ghost Position (clamp to 0-100%)
+        const rawPercentage = (e.clientX - rect.left) / rect.width;
+        const percentage = Math.max(0, Math.min(1, rawPercentage));
+        setDragGhostPos(percentage * 100);
+
+        // Calculate Date for tooltip
+        const targetTime = projectStart.getTime() + (totalDurationMs * percentage);
+        const displayDate = new Date(targetTime).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+        setDragCurrentDate(displayDate);
+      }
     }
-  }, [isPanning, draggingLog, dragStartPos, hasMovedEnough, getDeleteDirection, readOnly]);
+  }, [isPanning, draggingLog, dragStartPos, hasMovedEnough, readOnly, projectStart, totalDurationMs, selectionBox, selectedLogIds]);
 
   const handleGlobalMouseUp = useCallback((e: MouseEvent) => {
     if (isPanning) {
@@ -222,26 +355,91 @@ const Timeline: React.FC<TimelineProps> = ({
         return;
     }
     
+    if (selectionBox) {
+      // Box selection finished. 
+      // Do NOT clear selectedLogIds here, so the user can see what they selected.
+      
+      // If we dragged, prevent the subsequent click from clearing selection
+      const dist = Math.abs(selectionBox.currentX - selectionBox.startX) + Math.abs(selectionBox.currentY - selectionBox.startY);
+      if (dist > 5) {
+        ignoreClickRef.current = true;
+        // Reset after short delay to allow subsequent valid clicks
+        setTimeout(() => { ignoreClickRef.current = false; }, 100);
+      }
+
+      setSelectionBox(null);
+      return;
+    }
+    
     if (readOnly) return;
 
     if (draggingLog && hasMovedEnough) {
       const direction = getDeleteDirection(e.clientX);
+      
+      // Batch Processing Helpers
+      const logsToProcess = selectedLogIds.has(draggingLog.id) ? Array.from(selectedLogIds) : [draggingLog.id];
+
       if (direction) {
-        // Confirmed Delete
-        if (!draggingLog.isLocked && !lockedLevels[draggingLog.level]) {
-           onDeleteLog?.(draggingLog.id, draggingLog.oldDate);
-        }
+        // --- Bulk Delete ---
+        logsToProcess.forEach(id => {
+          // We need to find the log's date to delete it properly
+          for (const [d, list] of (Object.entries(logs) as [string, WorkLog[]][])) {
+             const found = list.find(l => l.id === id);
+             if (found && !found.isLocked && !lockedLevels[found.level]) {
+                onDeleteLog?.(id, d);
+                break;
+             }
+          }
+        });
+        setSelectedLogIds(new Set()); // Clear selection after delete
       } else if (lineRef.current) {
-        // Move Logic
+        // --- Bulk Move OR Copy ---
         const rect = lineRef.current.getBoundingClientRect();
         const rawPercentage = (e.clientX - rect.left) / rect.width;
         const percentage = Math.max(0, Math.min(1, rawPercentage));
         const targetTime = projectStart.getTime() + (totalDurationMs * percentage);
-        const targetDateStr = formatDate(new Date(targetTime));
+        const targetDate = parseSafeDate(formatDate(new Date(targetTime)));
+        
+        // Calculate difference in time for the "leader" log
+        const leaderOldDate = parseSafeDate(draggingLog.oldDate);
+        
+        // Refined Day Difference calculation
+        const oneDay = 24 * 60 * 60 * 1000;
+        const diffDays = Math.round((targetDate.getTime() - leaderOldDate.getTime()) / oneDay);
 
-        if (targetDateStr && onMoveLog && targetDateStr !== draggingLog.oldDate) {
-           if (!draggingLog.isLocked && !lockedLevels[draggingLog.level]) {
-              onMoveLog(draggingLog.id, draggingLog.oldDate, targetDateStr);
+        // If Cloning, we don't care about diffDays being 0 (duplicate in place), otherwise check 0
+        if ((diffDays !== 0 || draggingLog.isCloning) && (draggingLog.isCloning ? onCopyLog : onMoveLog)) {
+           logsToProcess.forEach(id => {
+              // Find source log info
+              let sourceLog: WorkLog | undefined;
+              let sourceDateStr = '';
+              for (const [d, list] of (Object.entries(logs) as [string, WorkLog[]][])) {
+                const found = list.find(l => l.id === id);
+                if (found) { 
+                  sourceLog = found; 
+                  sourceDateStr = d; 
+                  break; 
+                }
+              }
+
+              if (sourceLog && !sourceLog.isLocked && !lockedLevels[sourceLog.level]) {
+                const oldD = parseSafeDate(sourceDateStr);
+                const newD = new Date(oldD);
+                newD.setDate(oldD.getDate() + diffDays);
+                const newDateStr = formatDate(newD);
+                
+                if (draggingLog.isCloning && onCopyLog) {
+                  onCopyLog(id, sourceDateStr, newDateStr);
+                } else if (onMoveLog) {
+                  onMoveLog(id, sourceDateStr, newDateStr);
+                }
+              }
+           });
+           
+           // If copying, keep selection on original? Or select new? 
+           // Standard behavior: Keep originals selected or clear. Let's clear to avoid confusion.
+           if (draggingLog.isCloning) {
+              setSelectedLogIds(new Set()); 
            }
         }
       }
@@ -250,10 +448,12 @@ const Timeline: React.FC<TimelineProps> = ({
     setDragStartPos(null);
     setHasMovedEnough(false);
     setDeleteDirection(null);
-  }, [draggingLog, hasMovedEnough, lockedLevels, onDeleteLog, onMoveLog, projectStart, totalDurationMs, getDeleteDirection, readOnly, isPanning]);
+    setDragGhostPos(null);
+    setDragCurrentDate(null);
+  }, [draggingLog, hasMovedEnough, lockedLevels, onDeleteLog, onMoveLog, onCopyLog, projectStart, totalDurationMs, getDeleteDirection, readOnly, isPanning, selectionBox, selectedLogIds, logs]);
 
   useEffect(() => {
-    if (draggingLog || isPanning) {
+    if (draggingLog || isPanning || selectionBox) {
       window.addEventListener('mousemove', handleGlobalMouseMove);
       window.addEventListener('mouseup', handleGlobalMouseUp);
     }
@@ -261,12 +461,12 @@ const Timeline: React.FC<TimelineProps> = ({
       window.removeEventListener('mousemove', handleGlobalMouseMove);
       window.removeEventListener('mouseup', handleGlobalMouseUp);
     };
-  }, [draggingLog, isPanning, handleGlobalMouseMove, handleGlobalMouseUp]);
+  }, [draggingLog, isPanning, selectionBox, handleGlobalMouseMove, handleGlobalMouseUp]);
 
   const handleAxisClick = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
     if (readOnly) return;
-    if (isPanning || draggingLog || !lineRef.current) return;
+    if (isPanning || draggingLog || selectionBox || !lineRef.current) return;
     const rect = lineRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const percentage = Math.max(0, Math.min(1, x / rect.width));
@@ -275,15 +475,34 @@ const Timeline: React.FC<TimelineProps> = ({
     setSelectedDate(dateStr);
     setSelectedPercentage(percentage * 100);
     setShowLevelMenu(false);
-  }, [isPanning, draggingLog, projectStart, totalDurationMs, readOnly]);
+  }, [isPanning, draggingLog, selectionBox, projectStart, totalDurationMs, readOnly]);
+
+  const handleAxisMouseMove = useCallback((e: React.MouseEvent) => {
+    if (readOnly || isPanning || draggingLog || selectionBox || !lineRef.current) return;
+    
+    // Direct DOM manipulation for silky smooth performance
+    const rect = lineRef.current.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const percentage = Math.max(0, Math.min(1, x / rect.width));
+    const time = projectStart.getTime() + (percentage * totalDurationMs);
+    const displayDate = new Date(time).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+    
+    if (tooltipRef.current && tooltipTextRef.current) {
+        tooltipRef.current.style.opacity = '1';
+        tooltipRef.current.style.left = `${percentage * 100}%`;
+        tooltipTextRef.current.innerText = displayDate;
+    }
+  }, [readOnly, isPanning, draggingLog, selectionBox, projectStart, totalDurationMs]);
+
+  const handleAxisMouseLeave = useCallback(() => {
+    if (tooltipRef.current) {
+        tooltipRef.current.style.opacity = '0';
+    }
+  }, []);
 
   // Zoom with Space + Wheel
   const handleWheel = (e: React.WheelEvent) => {
     if (!isSpacePressed) return; // Only zoom if Space is held
-    
-    // Prevent default page scroll only when zooming
-    // e.preventDefault() is not passively supported in React's onWheel for many browsers, 
-    // but the intention is handled by logic separation.
     
     const zoomIntensity = 0.05;
     const delta = e.deltaY > 0 ? -zoomIntensity : zoomIntensity;
@@ -296,68 +515,57 @@ const Timeline: React.FC<TimelineProps> = ({
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       const isInput = document.activeElement?.tagName === 'INPUT' || document.activeElement?.tagName === 'TEXTAREA';
-      
-      // Space Navigation (Allowed in ReadOnly)
       if (e.code === 'Space') { 
         setIsSpacePressed(true); 
         if (!isInput) e.preventDefault(); 
       }
-      
-      if (isInput) return; // Don't trigger shortcuts while typing
-
-      // View Reset (Allowed in ReadOnly)
+      if (isInput) return;
       if (e.key.toLowerCase() === 'h') fitToView();
-      
-      // Escape (Allowed in ReadOnly)
       if (e.key === 'Escape') { 
         setSelectedDate(null); 
         setSelectedPercentage(null); 
         setShowLevelMenu(false); 
-        setActiveLogId(null);
+        setSelectedLogIds(new Set());
         setShowProjectSettings(false);
-        setShowExportModal(false); // Also close export modal on escape
+        setShowExportModal(false);
+      }
+      if (readOnly) return;
+      
+      // Select All (Ctrl/Cmd + A)
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
+         e.preventDefault();
+         const allIds = new Set<string>();
+         (Object.values(logs) as WorkLog[][]).flat().forEach(l => allIds.add(l.id));
+         setSelectedLogIds(allIds);
       }
 
-      // Editing Shortcuts (Blocked in ReadOnly)
-      if (readOnly) return;
-
-      // Move Active Log with Arrow Keys
-      if (activeLogId && onMoveLog && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+      // Keyboard Moving
+      if (selectedLogIds.size > 0 && onMoveLog && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
         e.preventDefault();
-        
-        // Find the active log object and its date
-        let targetLog: WorkLog | null = null;
-        let currentDateStr = '';
-
-        for (const [date, list] of Object.entries(logs) as [string, WorkLog[]][]) {
-          const found = list.find(l => l.id === activeLogId);
-          if (found) {
-            targetLog = found;
-            currentDateStr = date;
-            break;
-          }
-        }
-
-        if (targetLog && currentDateStr) {
-          // Check if log or its level is locked
-          if (targetLog.isLocked || lockedLevels[targetLog.level]) return;
-
-          const current = parseSafeDate(currentDateStr);
-          const direction = e.key === 'ArrowRight' ? 1 : -1;
-          current.setDate(current.getDate() + direction);
-          const newDateStr = formatDate(current);
-
-          onMoveLog(activeLogId, currentDateStr, newDateStr);
-        }
+        const direction = e.key === 'ArrowRight' ? 1 : -1;
+        selectedLogIds.forEach(activeLogId => {
+            let targetLog: WorkLog | null = null;
+            let currentDateStr = '';
+            for (const [date, list] of (Object.entries(logs) as [string, WorkLog[]][])) {
+              const found = list.find(l => l.id === activeLogId);
+              if (found) { targetLog = found; currentDateStr = date; break; }
+            }
+            if (targetLog && currentDateStr) {
+              if ((targetLog as WorkLog).isLocked || lockedLevels[(targetLog as WorkLog).level]) return;
+              const current = parseSafeDate(currentDateStr);
+              current.setDate(current.getDate() + direction);
+              const newDateStr = formatDate(current);
+              onMoveLog(activeLogId, currentDateStr, newDateStr);
+            }
+        });
       }
     };
 
     const handleKeyUp = (e: KeyboardEvent) => { if (e.code === 'Space') { setIsSpacePressed(false); setIsPanning(false); } };
-    
     window.addEventListener('keydown', handleKeyDown);
     window.addEventListener('keyup', handleKeyUp);
     return () => { window.removeEventListener('keydown', handleKeyDown); window.removeEventListener('keyup', handleKeyUp); };
-  }, [activeLogId, logs, onMoveLog, lockedLevels, setIsSpacePressed, setIsPanning, setTransform, setShowLevelMenu, setShowProjectSettings, setSelectedDate, setSelectedPercentage, setActiveLogId, readOnly, fitToView]);
+  }, [logs, onMoveLog, lockedLevels, setIsSpacePressed, setIsPanning, setTransform, setShowLevelMenu, setShowProjectSettings, setSelectedDate, setSelectedPercentage, selectedLogIds, readOnly, fitToView]);
 
   const executeExport = useCallback(async () => {
     if (!captureRef.current) return;
@@ -377,24 +585,21 @@ const Timeline: React.FC<TimelineProps> = ({
           useCORS: true,
           windowWidth: EXPORT_WIDTH, 
           onclone: (clonedDoc) => {
+            // ... (export logic unchanged)
             const wrapper = clonedDoc.querySelector('[data-capture-wrapper]') as HTMLElement;
             const inner = clonedDoc.querySelector('[data-inner-container]') as HTMLElement;
             if (wrapper && inner) {
                wrapper.style.width = `${EXPORT_WIDTH}px`;
                wrapper.style.height = 'auto';
                wrapper.style.overflow = 'visible';
-               
                if (withAlpha) {
-                 // Explicitly force transparency on the wrapper and inner container
                  wrapper.style.backgroundColor = 'transparent';
                  wrapper.style.background = 'transparent';
                  wrapper.classList.remove('bg-slate-50/10');
-                 
                  inner.style.backgroundColor = 'transparent';
                  inner.style.background = 'transparent';
                  inner.classList.remove('bg-white');
                }
-
                inner.style.transform = 'none';
                inner.style.width = '100%';
                inner.style.height = 'auto';
@@ -450,12 +655,34 @@ const Timeline: React.FC<TimelineProps> = ({
     <div 
       ref={containerRef}
       className={`w-full flex flex-col overflow-hidden bg-white relative transition-all select-none ${className || 'flex-1'} ${isPanning ? 'cursor-grabbing' : isSpacePressed ? 'cursor-grab' : ''}`}
-      onMouseDown={(e) => { 
-        if (isSpacePressed && e.button === 0) { setIsPanning(true); lastMousePos.current = { x: e.clientX, y: e.clientY }; } 
+      onMouseDown={handleContainerMouseDown}
+      onClick={() => { 
+        if (ignoreClickRef.current) {
+            ignoreClickRef.current = false;
+            return;
+        }
+        if(!readOnly && !selectionBox) { 
+           setSelectedDate(null); 
+           setSelectedPercentage(null); 
+           setSelectedLogIds(new Set()); 
+        } 
       }}
-      onClick={() => { if(!readOnly) { setSelectedDate(null); setSelectedPercentage(null); setActiveLogId(null); } }}
       onWheel={handleWheel}
     >
+      {/* Side Delete Gradients - Conditionally rendered based on deleteDirection */}
+      {draggingLog && deleteDirection === 'left' && (
+        <div className="fixed inset-y-0 left-0 w-32 bg-gradient-to-r from-red-500/80 to-transparent z-[100] pointer-events-none transition-all duration-300 flex flex-col items-center justify-center">
+           <i className="fas fa-trash-can text-white text-5xl opacity-80 drop-shadow-lg animate-pulse mb-2"></i>
+           {selectedLogIds.size > 1 && <span className="text-white font-black text-xs uppercase tracking-widest">{selectedLogIds.size} items</span>}
+        </div>
+      )}
+      {draggingLog && deleteDirection === 'right' && (
+        <div className="fixed inset-y-0 right-0 w-32 bg-gradient-to-l from-red-500/80 to-transparent z-[100] pointer-events-none transition-all duration-300 flex flex-col items-center justify-center">
+           <i className="fas fa-trash-can text-white text-5xl opacity-80 drop-shadow-lg animate-pulse mb-2"></i>
+           {selectedLogIds.size > 1 && <span className="text-white font-black text-xs uppercase tracking-widest">{selectedLogIds.size} items</span>}
+        </div>
+      )}
+
       {/* Project Settings Modal */}
       {!readOnly && showProjectSettings && (
         <div 
@@ -609,6 +836,19 @@ const Timeline: React.FC<TimelineProps> = ({
         data-capture-wrapper="true"
         className="flex-1 relative overflow-hidden flex items-center justify-center bg-slate-50/10"
       >
+        {/* Selection Box Overlay (Screen Coordinates relative to container, but inside overflow) */}
+        {selectionBox && (
+          <div 
+            className="absolute z-[150] bg-indigo-500/20 border border-indigo-500 pointer-events-none"
+            style={{
+              left: Math.min(selectionBox.startX, selectionBox.currentX) - (containerRef.current?.getBoundingClientRect().left || 0),
+              top: Math.min(selectionBox.startY, selectionBox.currentY) - (containerRef.current?.getBoundingClientRect().top || 0),
+              width: Math.abs(selectionBox.currentX - selectionBox.startX),
+              height: Math.abs(selectionBox.currentY - selectionBox.startY),
+            }}
+          ></div>
+        )}
+
         <div 
           data-inner-container="true"
           className="absolute origin-center transition-transform duration-300 ease-out bg-white"
@@ -622,53 +862,65 @@ const Timeline: React.FC<TimelineProps> = ({
           <div className="w-full h-full flex flex-col justify-center px-12 relative">
             {/* Log skyline */}
             <div className="relative w-full mb-0 flex flex-col justify-end" style={{ height: `${skylineHeight}px` }}>
-              {logMarkers.map((marker) => (
-                <div key={marker.dateStr} className="absolute bottom-0 flex flex-col items-center pointer-events-none" style={{ left: `${marker.pos}%`, transform: 'translateX(-50%)' }}>
+              {logMarkers.map((marker) => {
+                const isHoveredGroup = marker.logList.some((l: WorkLog) => l.id === hoveredLogId);
+                const isSelectedGroup = marker.logList.some((l: WorkLog) => selectedLogIds.has(l.id));
+                const isDraggingGroup = marker.logList.some((l: WorkLog) => draggingLog?.id === l.id);
+                // Boost z-index if interacted with to prevent occlusion overlap
+                const wrapperZIndex = isDraggingGroup ? 100 : (isHoveredGroup ? 60 : (isSelectedGroup ? 50 : 10));
+
+                return (
+                <div key={marker.dateStr} className="absolute bottom-0 flex flex-col items-center pointer-events-none" style={{ left: `${marker.pos}%`, transform: 'translateX(-50%)', zIndex: wrapperZIndex }}>
                   <div className="flex flex-col-reverse items-center pointer-events-auto">
                     {marker.logList.map((log, logIdx) => {
-                      const isSelected = activeLogId === log.id;
+                      const isSelected = selectedLogIds.has(log.id);
                       const isPast = marker.isPast;
                       const isLocked = !!log.isLocked || lockedLevels[log.level];
                       const isDraggingThis = draggingLog?.id === log.id;
-                      const isDeleting = isDraggingThis && deleteDirection !== null;
+                      const isDeleting = draggingLog && !draggingLog.isCloning && selectedLogIds.has(log.id) && deleteDirection !== null;
                       
                       return (
                         <div 
                           key={log.id}
+                          data-log-id={log.id}
                           onClick={(e) => e.stopPropagation()}
-                          onMouseDown={(e) => { 
-                             e.stopPropagation(); 
-                             if (readOnly) return;
-                             setActiveLogId(log.id); 
-                             if (!isLocked && e.button === 0) { 
-                               setDraggingLog({ id: log.id, oldDate: marker.dateStr, level: log.level, isLocked: !!log.isLocked }); 
-                               setDragStartPos({ x: e.clientX, y: e.clientY }); 
-                             } 
-                          }}
+                          onMouseDown={(e) => handleLogMouseDown(e, log, marker.dateStr)}
+                          onMouseEnter={() => setHoveredLogId(log.id)}
+                          onMouseLeave={() => setHoveredLogId(null)}
                           onDoubleClick={(e) => { 
                               e.stopPropagation(); 
-                              // Even readOnly users might want to view details
                               onSelectDate(marker.dateStr, log.id); 
                           }}
                           style={{ marginBottom: logIdx === 0 ? '8px' : '-24px', zIndex: isDraggingThis ? 2000 : (100 - logIdx), transform: isDraggingThis ? `scale(${isDeleting ? 1.05 : 1.05}) translateY(-5px)` : isSelected ? 'scale(1.05) translateY(-5px)' : 'none' }}
                           className={`
-                            border p-2.5 rounded-xl shadow-sm transition-all relative overflow-hidden group
-                            ${isLocked || readOnly ? (readOnly ? 'cursor-pointer' : 'grayscale-[0.6] cursor-not-allowed') : 'cursor-grab active:cursor-grabbing'}
+                            border p-2.5 rounded-xl shadow-sm transition-all relative overflow-hidden group select-none
+                            ${isLocked || readOnly ? (readOnly ? 'cursor-pointer' : 'grayscale-[0.6] cursor-not-allowed') : draggingLog?.isCloning ? 'cursor-copy' : 'cursor-grab active:cursor-grabbing'}
                             ${isPast && !isSelected ? 'grayscale-[0.5] opacity-75' : 'opacity-100 grayscale-0'}
-                            ${isDeleting ? 'bg-red-50 border-red-200 ring-4 ring-red-100' : isSelected ? 'ring-4 ring-indigo-500/30 border-indigo-500 bg-white' : 
+                            ${isDeleting ? 'bg-red-600 border-red-600 ring-8 ring-red-200/50 scale-110 rotate-2' : isSelected ? 'ring-4 ring-indigo-500/50 border-indigo-600 bg-indigo-50/50' : 
                               log.level === 1 ? 'w-48 bg-slate-900 border-slate-900 text-white' : 
-                              log.level === 2 ? 'w-44 bg-white border-indigo-100' : 'w-40 bg-slate-50 border-slate-200'}
+                              log.level === 2 ? 'w-44 bg-indigo-50 border-indigo-200' : 'w-40 bg-slate-50 border-slate-200'}
                           `}
                         >
+                          {/* Individual Lock Button */}
+                          {!readOnly && (
+                            <button 
+                              onClick={(e) => { e.stopPropagation(); onToggleLock?.(log.id, marker.dateStr); }}
+                              className={`absolute top-1 right-1 w-5 h-5 flex items-center justify-center rounded-full transition-all z-50 ${!!log.isLocked ? 'text-slate-400 bg-slate-100 opacity-100' : 'opacity-0 group-hover:opacity-100 text-slate-300 hover:text-indigo-500 hover:bg-white'}`}
+                              title={!!log.isLocked ? "Unlock Log" : "Lock Log"}
+                            >
+                              <i className={`fas ${!!log.isLocked ? 'fa-lock' : 'fa-lock-open'} text-[9px]`}></i>
+                            </button>
+                          )}
+
                           {isDeleting && (
-                            <div className="absolute inset-0 flex items-center justify-center bg-red-500/80 backdrop-blur-sm z-50 text-white font-black uppercase text-[10px] tracking-widest animate-in fade-in duration-75">
-                              Delete
+                            <div className="absolute inset-0 flex flex-col items-center justify-center bg-red-600 text-white font-black z-50 animate-in fade-in zoom-in duration-75">
+                              <i className="fas fa-trash-can text-3xl mb-2 animate-bounce"></i>
+                              <span className="uppercase text-[9px] tracking-[0.2em]">Delete</span>
                             </div>
                           )}
                           <div className="flex items-center gap-2 mb-1 overflow-hidden">
-                            <div className={`w-2 h-2 rounded-full flex-shrink-0 ${log.level === 1 ? 'bg-amber-400' : log.level === 2 ? 'bg-indigo-50' : 'bg-slate-400'}`}></div>
-                            <span className={`text-[10px] font-black leading-none truncate uppercase tracking-tight mt-[1px] ${isSelected ? 'text-slate-900' : log.level === 1 ? 'text-amber-100' : 'text-slate-800'}`}>{log.author}</span>
-                            {isLocked && <i className="fas fa-lock text-[8px] opacity-50 ml-auto"></i>}
+                            <div className={`w-2 h-2 rounded-full flex-shrink-0 ${log.level === 1 ? 'bg-amber-400' : log.level === 2 ? 'bg-indigo-500' : 'bg-slate-300'}`}></div>
+                            <span className={`text-[10px] font-black leading-none truncate uppercase tracking-tight mt-[1px] ${isSelected && !isDeleting ? 'text-indigo-900' : log.level === 1 ? 'text-amber-100' : log.level === 2 ? 'text-indigo-900' : 'text-slate-800'}`}>{log.author}</span>
                           </div>
                           
                           <div className={`text-[8px] font-black opacity-60 mb-1.5 flex items-center gap-1 ${log.level === 1 && !isSelected ? 'text-amber-200' : 'text-slate-500'}`}>
@@ -676,14 +928,14 @@ const Timeline: React.FC<TimelineProps> = ({
                              {parseSafeDate(marker.dateStr).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
                           </div>
 
-                          <p className={`text-[9px] line-clamp-2 italic leading-relaxed truncate ${isSelected ? 'text-slate-500' : log.level === 1 ? 'text-slate-300' : 'text-slate-400'}`}>{log.summary || "Pending update..."}</p>
+                          <p className={`text-[9px] line-clamp-2 italic leading-relaxed truncate ${isSelected && !isDeleting ? 'text-indigo-800' : log.level === 1 ? 'text-slate-300' : 'text-slate-400'}`}>{log.summary || "Pending update..."}</p>
                         </div>
                       );
                     })}
                   </div>
                   <div className={`w-0.5 bg-gradient-to-t transition-all duration-700 ${marker.isPast ? 'opacity-30' : 'opacity-100'}`} style={{ height: `${marker.baseStemHeight}px`, background: `linear-gradient(to top, #f1f5f9, ${marker.logList[0]?.level === 1 ? '#fbbf24' : marker.logList[0]?.level === 2 ? '#6366f1' : '#94a3b8'})` }}></div>
                 </div>
-              ))}
+              );})}
             </div>
 
             {/* Axis */}
@@ -700,9 +952,60 @@ const Timeline: React.FC<TimelineProps> = ({
               <div 
                 ref={lineRef} 
                 onClick={handleAxisClick} 
+                onMouseMove={handleAxisMouseMove}
+                onMouseLeave={handleAxisMouseLeave}
                 className={`relative h-2 w-full rounded-full border border-slate-200/50 ${readOnly ? '' : 'cursor-crosshair'}`}
                 style={{ background: `linear-gradient(to right, #cbd5e1 0%, #cbd5e1 ${todayPos}%, #f1f5f9 ${todayPos}%, #f1f5f9 100%)` }}
               >
+                {/* Dragging Real-time Feedback - Ghost Marker & Date Tooltip */}
+                {dragGhostPos !== null && dragCurrentDate && (
+                  <div 
+                    className="absolute top-1/2 -translate-y-1/2 z-[50] pointer-events-none" 
+                    style={{ left: `${dragGhostPos}%` }}
+                  >
+                    {/* Ghost Dot */}
+                    <div className={`w-6 h-6 rounded-full border-[3px] ${draggingLog?.isCloning ? 'border-emerald-400 bg-emerald-500/50' : 'border-indigo-200 bg-indigo-500/50'} transform -translate-x-1/2`}></div>
+                    
+                    {/* Bulk Drag Badge */}
+                    {selectedLogIds.size > 1 && (
+                      <div className={`absolute top-4 left-4 ${draggingLog?.isCloning ? 'bg-emerald-600' : 'bg-indigo-600'} text-white text-[9px] font-black px-2 py-0.5 rounded-full whitespace-nowrap shadow-md`}>
+                        {draggingLog?.isCloning ? 'Copy' : ''} +{selectedLogIds.size - 1}
+                      </div>
+                    )}
+                     {/* Single Drag Badge Copy */}
+                    {selectedLogIds.size === 1 && draggingLog?.isCloning && (
+                      <div className="absolute top-4 left-4 bg-emerald-600 text-white text-[9px] font-black px-2 py-0.5 rounded-full whitespace-nowrap shadow-md">
+                        Copy
+                      </div>
+                    )}
+                    
+                    {/* Date Label */}
+                    <div className="absolute -top-14 -translate-x-1/2 flex flex-col items-center animate-in fade-in zoom-in-95 duration-75">
+                      <div className={`px-3 py-1.5 ${draggingLog?.isCloning ? 'bg-emerald-600' : 'bg-indigo-600'} text-white text-[10px] font-black rounded-lg shadow-xl whitespace-nowrap mb-1`}>
+                        {dragCurrentDate}
+                      </div>
+                      <div className={`w-0.5 h-3 ${draggingLog?.isCloning ? 'bg-emerald-600' : 'bg-indigo-600'}`}></div>
+                    </div>
+                  </div>
+                )}
+
+                {/* Hover Date Tooltip (Imperative Ref-based for performance) */}
+                {!readOnly && !draggingLog && !selectionBox && (
+                  <div 
+                    ref={tooltipRef}
+                    className="absolute -top-12 -translate-x-1/2 z-[70] flex flex-col items-center pointer-events-none opacity-0 transition-opacity duration-75"
+                    style={{ left: `0%` }}
+                  >
+                    <div 
+                        ref={tooltipTextRef}
+                        className="px-3 py-1.5 bg-slate-900 text-white text-[10px] font-black rounded-lg shadow-xl whitespace-nowrap mb-1"
+                    >
+                      {/* Text set via JS */}
+                    </div>
+                    <div className="w-0.5 h-3 bg-slate-900"></div>
+                  </div>
+                )}
+
                 {todayIsWithinRange && (
                   <div className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 z-[60] flex flex-col items-center pointer-events-none" style={{ left: `${todayPos}%` }}>
                     <div className="w-[2px] h-6 bg-red-500 shadow-[0_0_8px_rgba(239,68,68,0.5)]"></div>
@@ -710,10 +1013,15 @@ const Timeline: React.FC<TimelineProps> = ({
                   </div>
                 )}
                 {logMarkers.map(m => (
-                   <div key={m.dateStr} className={`absolute top-1/2 -translate-y-1/2 rounded-full border-[3px] border-white shadow-lg z-20 transition-all ${m.isPast ? 'opacity-60 grayscale-[0.3]' : 'opacity-100'} ${m.logList[0]?.level === 1 ? 'w-7 h-7 bg-amber-500' : m.logList[0]?.level === 2 ? 'w-6 h-6 bg-indigo-600' : 'w-5 h-5 bg-slate-400'}`} style={{ left: `${m.pos}%`, transform: 'translate(-50%, -50%)' }} />
+                   <div key={m.dateStr} className={`absolute top-1/2 -translate-y-1/2 rounded-full border-[3px] border-white shadow-lg z-20 transition-all ${m.isPast ? 'opacity-60 grayscale-[0.3]' : 'opacity-100'} ${m.logList[0]?.level === 1 ? 'w-7 h-7 bg-amber-500' : m.logList[0]?.level === 2 ? 'w-6 h-6 bg-indigo-500' : 'w-5 h-5 bg-slate-400'}`} style={{ left: `${m.pos}%`, transform: 'translate(-50%, -50%)' }} />
                 ))}
                 {!readOnly && selectedPercentage && (
-                  <div className="absolute top-1/2 -translate-y-1/2 z-40" style={{ left: `${selectedPercentage}%` }} onClick={e => e.stopPropagation()}>
+                  <div 
+                    className="absolute top-1/2 -translate-y-1/2 z-40" 
+                    style={{ left: `${selectedPercentage}%` }} 
+                    onClick={e => e.stopPropagation()}
+                    onMouseDown={e => e.stopPropagation()} // Stop propagation to prevent clearing state
+                  >
                     <button onClick={() => setShowLevelMenu(true)} className="w-10 h-10 bg-indigo-600 text-white rounded-xl flex items-center justify-center shadow-xl transform -translate-x-1/2 -translate-y-16 border-2 border-white"><i class="fas fa-plus"></i></button>
                     {showLevelMenu && (
                       <div className="absolute -translate-x-1/2 -translate-y-[260px] bg-white border border-slate-100 shadow-2xl rounded-2xl p-2 flex flex-col gap-1 min-w-[160px]">
