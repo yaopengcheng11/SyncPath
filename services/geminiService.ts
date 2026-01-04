@@ -1,35 +1,32 @@
 
-import { GoogleGenAI, Type } from "@google/genai";
+import { GoogleGenAI } from "@google/genai";
 import { Goal } from "../types";
 
 // Always use const ai = new GoogleGenAI({apiKey: process.env.API_KEY});
 const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
 
+const cleanJson = (text: string): string => {
+  if (!text) return "[]";
+  let cleaned = text.trim();
+  // Remove markdown code blocks if present
+  cleaned = cleaned.replace(/^```json\s*/i, '').replace(/^```\s*/, '').replace(/\s*```$/, '');
+  return cleaned.trim();
+};
+
 export const suggestGoals = async (context: string): Promise<Partial<Goal>[]> => {
   try {
     const response = await ai.models.generateContent({
       model: "gemini-3-flash-preview",
-      contents: `Based on this context of work: "${context}", suggest 3 SMART goals for next week. Provide the response as a JSON array of objects with title and description fields.`,
+      contents: `Based on this context of work: "${context}", suggest 3 SMART goals for next week. Provide the response as a raw JSON array of objects (no markdown formatting) with "title" and "description" fields.`,
       config: {
         responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.ARRAY,
-          items: {
-            type: Type.OBJECT,
-            properties: {
-              title: { type: Type.STRING },
-              description: { type: Type.STRING }
-            },
-            required: ["title", "description"]
-          }
-        }
       }
     });
 
     // The GenerateContentResponse object features a text property (not a method)
     const text = response.text;
     if (!text) return [];
-    return JSON.parse(text);
+    return JSON.parse(cleanJson(text));
   } catch (error) {
     console.error("Gemini Error:", error);
     return [];
@@ -71,7 +68,7 @@ export const generateRoadmap = async (description: string, startDate: string, en
       Generate 5 to 10 distinct work logs distributed across this timeline. 
       Include a mix of major milestones (level 1), important updates (level 2), and routine check-ins (level 3).
       
-      Return a JSON array where each object has:
+      Return a raw JSON array (no markdown formatting) where each object has:
       - date: string (YYYY-MM-DD, must be within the project range)
       - summary: string (concise title of the update)
       - level: number (1, 2, or 3)
@@ -84,29 +81,12 @@ export const generateRoadmap = async (description: string, startDate: string, en
       contents: prompt,
       config: {
         responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.ARRAY,
-          items: {
-            type: Type.OBJECT,
-            properties: {
-              date: { type: Type.STRING },
-              summary: { type: Type.STRING },
-              level: { type: Type.INTEGER },
-              author: { type: Type.STRING },
-              goals: { 
-                type: Type.ARRAY,
-                items: { type: Type.STRING }
-              }
-            },
-            required: ["date", "summary", "level", "author", "goals"]
-          }
-        }
       }
     });
 
     const text = response.text;
     if (!text) return [];
-    return JSON.parse(text);
+    return JSON.parse(cleanJson(text));
   } catch (error) {
     console.error("Gemini Roadmap Generation Error:", error);
     return [];
