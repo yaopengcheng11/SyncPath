@@ -1,5 +1,5 @@
 {
-  "name": "Team Roadmap & Sync Log",
-  "description": "A streamlined team management tool featuring a continuous horizontal timeline for tracking milestones and creating detailed weekly goal-oriented work logs with AI assistance.",
+  "name": "SyncPath",
+  "description": "A team planning tool for AI product managers, with milestone timelines, project permissions, live collaboration and member mentions.",
   "requestFramePermissions": []
 }

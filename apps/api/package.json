@@ -1,0 +1,50 @@
+{
+  "name": "@syncpath/api",
+  "version": "0.1.0",
+  "private": true,
+  "description": "SyncPath API — NestJS + Fastify + Prisma",
+  "scripts": {
+    "dev": "nest start --watch",
+    "start": "node dist/main.js",
+    "build": "nest build",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src --ext .ts --max-warnings 0",
+    "test": "npm run test:safety && npm run build -w @syncpath/domain && npm run build && tsx scripts/run-integration-tests.ts",
+    "test:watch": "npm run test:safety && npm run build -w @syncpath/domain && npm run build && tsx scripts/run-integration-tests.ts --watch",
+    "test:safety": "node --import tsx --test scripts/integration-safety.test.ts",
+    "prisma:generate": "prisma generate",
+    "prisma:format": "prisma format",
+    "prisma:validate": "prisma validate",
+    "db:migrate": "prisma migrate dev",
+    "db:migrate:deploy": "prisma migrate deploy",
+    "db:reset": "prisma migrate reset --force --skip-seed && npm run db:seed",
+    "db:seed": "tsx prisma/seed.ts",
+    "db:studio": "prisma studio",
+    "openapi:dump": "npm run build && tsx scripts/dump-openapi.ts"
+  },
+  "dependencies": {
+    "@fastify/cookie": "^9.4.0",
+    "@fastify/static": "^7.0.4",
+    "@nestjs/common": "^10.3.10",
+    "@nestjs/core": "^10.3.10",
+    "@nestjs/platform-fastify": "^10.3.10",
+    "@nestjs/swagger": "^7.4.2",
+    "@prisma/client": "^5.18.0",
+    "@syncpath/domain": "*",
+    "bcryptjs": "^2.4.3",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.1",
+    "swagger-ui-express": "^5.0.1"
+  },
+  "devDependencies": {
+    "@nestjs/cli": "^10.4.2",
+    "@nestjs/schematics": "^10.1.2",
+    "@syncpath/config": "*",
+    "@types/bcryptjs": "^2.4.6",
+    "@types/node": "^20.14.10",
+    "prisma": "^5.18.0",
+    "tsx": "^4.16.2",
+    "typescript": "^5.4.2",
+    "vitest": "^1.6.0"
+  }
+}

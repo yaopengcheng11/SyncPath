@@ -1,0 +1,14 @@
+/* Tailwind entry point.
+ *
+ * The legacy index.html loaded Tailwind from cdn.tailwindcss.com at runtime,
+ * which conflicted with the npm dependency declared in package.json and
+ * with docs/SYNCPATH_DEVELOPMENT_FRAMEWORK_ACCEPTANCE.md §4.1 ("样式构建进入
+ * 项目，去掉运行时 Tailwind CDN"). We compile Tailwind locally instead.
+ *
+ * Keep this file tiny: only Tailwind layers and brand-specific extensions.
+ * Per-component styling stays inside the .tsx files.
+ */
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;

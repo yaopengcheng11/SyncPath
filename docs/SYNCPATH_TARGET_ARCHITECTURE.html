@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SyncPath · 目标架构</title>
+  <style>
+    *,*::before,*::after{box-sizing:border-box}
+    :root{--paper:#f8fafc;--ink:#0f172a;--muted:#475569;--soft:#64748b;--accent:#4f46e5;--tint:#eef2ff;--line:#e2e8f0;--link:#4338ca;--sans:ui-sans-serif,system-ui,sans-serif,"Apple Color Emoji","Segoe UI Emoji","Segoe UI Symbol","Noto Color Emoji";--mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+    body{margin:0;background:var(--paper);color:var(--ink);font-family:var(--sans);padding:40px 32px}
+    main{max-width:1280px;margin:auto}header{display:flex;gap:20px;align-items:center;margin:0 0 20px}
+    .mark{background:var(--ink);color:white;font-size:24px;font-weight:800;width:52px;height:52px;display:grid;place-items:center;border-radius:12px;flex:none}
+    h1{font-size:28px;letter-spacing:-.03em;margin:0;font-weight:800}.kicker{font-size:12px;color:var(--muted);margin:0 0 6px}
+    .intro{font-size:14px;color:var(--muted);line-height:1.7;margin:8px 0 24px;max-width:1000px}
+    .diagram{overflow-x:auto}svg{display:block;width:100%;min-width:960px;height:auto}
+    svg text{font-family:var(--sans);fill:var(--ink)}.node-name{font-size:16px;font-weight:600}.description{font-size:14px;fill:var(--muted)}.technical{font-size:11px;font-family:var(--mono);fill:var(--soft)}.zone{font-size:14px;font-weight:600;fill:var(--muted)}
+    .node{fill:white;stroke:var(--ink);stroke-width:1.2}.focal{fill:var(--tint);stroke:var(--accent);stroke-width:1.5}.store{fill:#f1f5f9;stroke:var(--soft)}.external{fill:#f1f5f9;stroke:#94a3b8}.edge{fill:none;stroke:var(--muted);stroke-width:1.5;marker-end:url(#arrow)}.link{stroke:var(--link);marker-end:url(#arrow-link)}.async{stroke-dasharray:5 4}
+    .notes{display:grid;grid-template-columns:1.2fr 1fr;gap:24px;border-top:1px solid var(--line);padding-top:24px;margin-top:16px}.notes h2{font-size:16px;margin:0 0 8px}.notes p{font-size:14px;line-height:1.8;color:var(--muted);margin:0}.palette{display:flex;gap:8px;align-items:center;margin-top:28px;flex-wrap:wrap;font:12px var(--mono);color:var(--muted)}.swatch{width:20px;height:20px;border:1px solid #cbd5e1;border-radius:4px}.footer{font-size:12px;color:var(--soft);margin:20px 0 0}
+    @media(max-width:700px){body{padding:24px 16px}.notes{grid-template-columns:1fr}h1{font-size:24px}}
+    @media print{body{padding:12px}.diagram{overflow:visible}svg{min-width:0}.notes{break-inside:avoid}}
+  </style>
+</head>
+<body>
+<main>
+  <header><div class="mark" aria-hidden="true">S</div><div><p class="kicker">SYNCPATH · 规划方案 v0.1 · 2026-09-16</p><h1>从产品证据到团队交付</h1></div></header>
+  <p class="intro">React 前端负责交互，API 负责授权与业务事务，Worker 执行耗时任务。数据库保存业务事实；模型结果先进入草稿。前后端独立构建，通过同源入口访问。</p>
+  <div class="diagram">
+  <svg viewBox="0 0 1280 720" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="syncpath-architecture-title syncpath-architecture-desc">
+    <title id="syncpath-architecture-title">SyncPath 前后端分离目标架构</title>
+    <desc id="syncpath-architecture-desc">Web 通过 API 访问持久化数据，API 发起队列任务，Worker 调用模型和研发集成并将结果持久化；业务写入与异步任务分别受权限和版本约束。</desc>
+    <defs>
+      <marker id="arrow" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#475569"/></marker>
+      <marker id="arrow-accent" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#4f46e5"/></marker>
+      <marker id="arrow-link" markerWidth="8" markerHeight="6" refX="7" refY="3" orient="auto"><polygon points="0 0,8 3,0 6" fill="#4338ca"/></marker>
+    </defs>
+    <rect width="1280" height="720" fill="#f8fafc"/>
+    <text x="64" y="72" class="zone">01 / 交互与请求</text>
+    <text x="432" y="72" class="zone">02 / 业务与任务执行</text>
+    <text x="928" y="72" class="zone">03 / 数据与外部能力</text>
+    <!-- Directed paths show the request / work direction; responses are implicit. -->
+    <path class="edge link" d="M304 200 H432"/>
+    <path class="edge" d="M752 200 H928"/>
+    <path class="edge async" d="M480 264 V312 Q480 320 472 320 H192 Q184 320 184 328 V408"/>
+    <path class="edge async" d="M304 472 H432"/>
+    <path class="edge" d="M688 408 V320 Q688 312 696 312 H1064 Q1072 312 1072 304 V264"/>
+    <path class="edge link" d="M752 440 H816 Q824 440 824 432 V416 Q824 408 832 408 H928"/>
+    <path class="edge link" d="M752 504 H856 Q864 504 864 512 V544 Q864 552 872 552 H928"/>
+    <!-- Every label sits off its connector with an opaque background. -->
+    <rect x="316" y="174" width="104" height="16" fill="#f8fafc"/><text x="368" y="186" text-anchor="middle" class="technical">REST / EVENTS</text>
+    <rect x="784" y="174" width="112" height="16" fill="#f8fafc"/><text x="840" y="186" text-anchor="middle" class="technical">TRANSACTION</text>
+    <rect x="264" y="294" width="104" height="16" fill="#f8fafc"/><text x="316" y="306" text-anchor="middle" class="technical">OUTBOX RELAY</text>
+    <rect x="324" y="446" width="88" height="16" fill="#f8fafc"/><text x="368" y="458" text-anchor="middle" class="technical">CONSUME</text>
+    <rect x="804" y="286" width="112" height="16" fill="#f8fafc"/><text x="860" y="298" text-anchor="middle" class="technical">STORE RESULT</text>
+    <!-- Nodes: 7. Arrows: 7. -->
+    <g data-node="web"><rect x="64" y="136" width="240" height="128" rx="8" class="node"/><text x="84" y="164" class="technical">WEB · REACT / VITE</text><text x="84" y="196" class="node-name">产品团队工作台</text><text x="84" y="222" class="description">路线图 · 规格 · 证据与评审</text><text x="84" y="244" class="description">查询缓存与局部编辑状态</text></g>
+    <g data-node="api"><rect x="432" y="136" width="320" height="128" rx="8" class="focal"/><text x="452" y="164" class="technical">API · NESTJS / FASTIFY</text><text x="452" y="196" class="node-name">模块化业务服务</text><text x="452" y="222" class="description">身份与项目权限 · 业务版本 · 审计</text><text x="452" y="244" class="description">提交后推送事件；不广播全量状态</text></g>
+    <g data-node="storage"><rect x="928" y="136" width="288" height="128" rx="8" class="store"/><text x="948" y="164" class="technical">POSTGRESQL + OBJECT STORAGE</text><text x="948" y="196" class="node-name">持久化数据</text><text x="948" y="222" class="description">业务事实 · 版本 · Outbox</text><text x="948" y="244" class="description">附件与备份；检索按阶段接入</text></g>
+    <g data-node="queue"><rect x="64" y="408" width="240" height="128" rx="8" class="store"/><text x="84" y="436" class="technical">REDIS / BULLMQ</text><text x="84" y="468" class="node-name">异步队列</text><text x="84" y="494" class="description">重试 · 去重 · 限流</text><text x="84" y="516" class="description">业务结果仍由数据库保存</text></g>
+    <g data-node="worker"><rect x="432" y="408" width="320" height="128" rx="8" class="focal"/><text x="452" y="436" class="technical">WORKER · INDEPENDENT PROCESS</text><text x="452" y="468" class="node-name">AI 与集成任务</text><text x="452" y="494" class="description">再次鉴权 · 预算预留 · 幂等写入</text><text x="452" y="516" class="description">生成草稿 · 导入 · 同步与通知</text></g>
+    <g data-node="models"><rect x="928" y="360" width="288" height="96" rx="8" class="external"/><text x="948" y="388" class="technical">MODEL PROVIDER</text><text x="948" y="416" class="node-name">可替换模型供应商</text><text x="948" y="442" class="description">经服务端适配；记录版本与费用</text></g>
+    <g data-node="integrations"><rect x="928" y="504" width="288" height="96" rx="8" class="external"/><text x="948" y="532" class="technical">INTEGRATION ADAPTER</text><text x="948" y="560" class="node-name">研发与协作工具</text><text x="948" y="586" class="description">先链接，再接入首个授权系统</text></g>
+    <line x1="40" y1="648" x2="1240" y2="648" stroke="#e2e8f0"/>
+    <line x1="64" y1="680" x2="104" y2="680" stroke="#475569" stroke-width="1.5"/><text x="120" y="684" class="description">业务调用</text>
+    <line x1="300" y1="680" x2="340" y2="680" stroke="#475569" stroke-dasharray="5 4" stroke-width="1.5"/><text x="356" y="684" class="description">异步任务</text>
+    <line x1="540" y1="680" x2="580" y2="680" stroke="#4338ca" stroke-width="1.5"/><text x="596" y="684" class="description">客户端或外部接口</text>
+    <rect x="896" y="672" width="24" height="16" rx="4" fill="#eef2ff" stroke="#4f46e5"/><text x="936" y="684" class="description">核心服务</text>
+  </svg>
+  </div>
+  <div class="notes"><section><h2>事实与草稿有明确边界</h2><p>API 校验当前权限和对象版本后写入数据库。AI 结果保留来源、输入快照与模型版本，经用户采纳后成为正式内容。队列中的任务开始执行和发布结果时都重新检查权限。</p></section><section><h2>按阶段引入基础设施</h2><p>先完成 Web、API 和 PostgreSQL。Redis、Worker、对象存储在异步任务与附件阶段接入。图中合并数据库与附件存储；反向代理、观测和 CI 细节见开发计划。</p></section></div>
+  <div class="palette"><span class="swatch" style="background:#f8fafc"></span>#F8FAFC <span class="swatch" style="background:#ffffff"></span>#FFFFFF <span class="swatch" style="background:#0f172a"></span>#0F172A <span class="swatch" style="background:#4f46e5"></span>#4F46E5 <span class="swatch" style="background:#eef2ff"></span>#EEF2FF</div>
+  <p class="footer">配色与系统字体栈提取自 SyncPath 源码。此图描述规划架构，不代表当前系统已经具备这些服务。品牌规范与详细验收另见同目录 Markdown。</p>
+</main>
+</body>
+</html>

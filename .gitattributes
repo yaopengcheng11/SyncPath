@@ -1,0 +1,50 @@
+# .gitattributes — enforce LF line endings on text files.
+#
+# Background: this repo was created on Windows; several files in the working
+# tree still carry CRLF while the git index stores LF. That mismatch floods
+# `git diff` with per-line noise and breaks tools like `git diff --check`.
+#
+# How to use:
+#   1. Commit this file.
+#   2. Once, run: `git add --renormalize .` then commit the result as
+#      `chore: normalize line endings to LF`. This rewrites the index to match
+#      the attributes below without touching file content semantically.
+#   3. From then on, every checkout will write LF regardless of platform.
+#
+# Anything not matched below falls back to git's default (autocrlf setting).
+
+# Source
+*.ts    text eol=lf
+*.tsx   text eol=lf
+*.js    text eol=lf
+*.cjs   text eol=lf
+*.mjs   text eol=lf
+*.jsx   text eol=lf
+
+# Build / config
+*.json  text eol=lf
+*.html  text eol=lf
+*.css   text eol=lf
+*.scss  text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+*.toml  text eol=lf
+
+# Docs / scripts
+*.md    text eol=lf
+*.sh    text eol=lf
+
+# Explicitly keep Windows-native line endings where appropriate
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
+*.ps1   text eol=crlf
+
+# Binary — let git decide
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.webp  binary
+*.ico   binary
+*.woff  binary
+*.woff2 binary

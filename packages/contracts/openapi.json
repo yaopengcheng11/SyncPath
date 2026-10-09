@@ -1,0 +1,1782 @@
+{
+  "openapi": "3.0.0",
+  "paths": {
+    "/health": {
+      "get": {
+        "operationId": "HealthController_check",
+        "summary": "Liveness + database ping",
+        "description": "Returns service uptime and database connectivity status.",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "health"
+        ]
+      }
+    },
+    "/api/v1/sessions/register": {
+      "post": {
+        "operationId": "SessionsController_register",
+        "summary": "Register a new account and start a session.",
+        "description": "POST /api/v1/sessions/register — create a new account and start a session.",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Function"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionResponse"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "identity"
+        ]
+      }
+    },
+    "/api/v1/sessions": {
+      "post": {
+        "operationId": "SessionsController_login",
+        "summary": "Log in with username or email + password.",
+        "description": "POST /api/v1/sessions — log in with username (or email) + password.",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Function"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionResponse"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "identity"
+        ]
+      }
+    },
+    "/api/v1/sessions/me": {
+      "get": {
+        "operationId": "SessionsController_me",
+        "summary": "Return the currently authenticated user.",
+        "description": "GET /api/v1/sessions/me — return the current user (used by the SPA on load).",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SessionResponse"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "identity"
+        ]
+      },
+      "delete": {
+        "operationId": "SessionsController_logout",
+        "summary": "Revoke the current session and clear the cookie.",
+        "description": "DELETE /api/v1/sessions/me — revoke the session and clear the cookie.",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "identity"
+        ]
+      }
+    },
+    "/api/v1/workspaces": {
+      "get": {
+        "operationId": "WorkspacesController_list",
+        "summary": "List workspaces the caller is a member of.",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PublicWorkspace"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "workspaces"
+        ]
+      },
+      "post": {
+        "operationId": "WorkspacesController_create",
+        "summary": "Create a workspace. The caller becomes Owner.",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Function"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicWorkspace"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "workspaces"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{id}": {
+      "get": {
+        "operationId": "WorkspacesController_getOne",
+        "summary": "Fetch a single workspace by id.",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicWorkspace"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "workspaces"
+        ]
+      },
+      "patch": {
+        "operationId": "WorkspacesController_update",
+        "summary": "Rename a workspace (Owner/Admin).",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Function"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicWorkspace"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "workspaces"
+        ]
+      },
+      "delete": {
+        "operationId": "WorkspacesController_remove",
+        "summary": "Archive a workspace (Owner only). Children are hidden but data is preserved.",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "workspaces"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspaceId}/projects": {
+      "get": {
+        "operationId": "ProjectsController_list",
+        "summary": "List projects in a workspace the caller can see.",
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PublicProject"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "projects"
+        ]
+      },
+      "post": {
+        "operationId": "ProjectsController_create",
+        "summary": "Create a project. The caller becomes Lead.",
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateProjectBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicProject"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "projects"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspaceId}/projects/{id}": {
+      "get": {
+        "operationId": "ProjectsController_getOne",
+        "summary": "Fetch a project by id within the workspace.",
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicProject"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "projects"
+        ]
+      },
+      "patch": {
+        "operationId": "ProjectsController_update",
+        "summary": "Update a project within the workspace.",
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateProjectBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicProject"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "projects"
+        ]
+      },
+      "delete": {
+        "operationId": "ProjectsController_remove",
+        "summary": "Soft-delete a project within the workspace.",
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "projects"
+        ]
+      }
+    },
+    "/api/v1/projects/{id}": {
+      "get": {
+        "operationId": "ProjectByIdController_getOne",
+        "summary": "Fetch a project by id.",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicProject"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "projects"
+        ]
+      },
+      "patch": {
+        "operationId": "ProjectByIdController_update",
+        "summary": "Update a project (revision-checked via expectedRevision).",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateProjectBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicProject"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "projects"
+        ]
+      },
+      "delete": {
+        "operationId": "ProjectByIdController_remove",
+        "summary": "Soft-delete a project (Lead only).",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "projects"
+        ]
+      }
+    },
+    "/api/v1/projects/{projectId}/entries": {
+      "get": {
+        "operationId": "ProjectEntriesController_list",
+        "summary": "List progress entries for a project (optional ?from & ?to).",
+        "parameters": [
+          {
+            "name": "from",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "to",
+            "required": true,
+            "in": "query",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PublicEntry"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "entries"
+        ]
+      },
+      "post": {
+        "operationId": "ProjectEntriesController_create",
+        "summary": "Create a progress entry.",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateEntryBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicEntry"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "entries"
+        ]
+      }
+    },
+    "/api/v1/entries/{id}": {
+      "get": {
+        "operationId": "EntryActionsController_getOne",
+        "summary": "Fetch a progress entry by id.",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicEntry"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "entries"
+        ]
+      },
+      "patch": {
+        "operationId": "EntryActionsController_update",
+        "summary": "Update a progress entry (revision-checked via expectedRevision).",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateEntryBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PublicEntry"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "entries"
+        ]
+      },
+      "delete": {
+        "operationId": "EntryActionsController_remove",
+        "summary": "Soft-delete a progress entry.",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "entries"
+        ]
+      }
+    },
+    "/api/v1/projects/{projectId}/mention-candidates": {
+      "get": {
+        "operationId": "MentionCandidatesController_list",
+        "summary": "List users eligible to be mentioned in this project.",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MentionCandidateResponse"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "mentions"
+        ]
+      }
+    },
+    "/api/v1/notifications": {
+      "get": {
+        "operationId": "MentionNotificationsController_list",
+        "summary": "List mentions addressed to the signed-in user.",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MentionNotificationResponse"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "mentions"
+        ]
+      }
+    },
+    "/api/v1/notifications/{id}/read": {
+      "patch": {
+        "operationId": "MentionNotificationsController_markRead",
+        "summary": "Mark one of the signed-in user’s mentions as read.",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "mentions"
+        ]
+      }
+    },
+    "/api/v1/imports/validate": {
+      "post": {
+        "operationId": "ImportsController_validate",
+        "summary": "Pre-flight check for a legacy JSON import. Never writes.",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "imports"
+        ]
+      }
+    },
+    "/api/v1/imports/apply": {
+      "post": {
+        "operationId": "ImportsController_apply",
+        "summary": "Apply a legacy JSON import (requires accept: true).",
+        "parameters": [],
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "imports"
+        ]
+      }
+    },
+    "/api/v1/projects/{projectId}/members": {
+      "get": {
+        "operationId": "ProjectMembersController_list",
+        "summary": "List project members (Lead/Editor/Viewer).",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "project_members"
+        ]
+      },
+      "post": {
+        "operationId": "ProjectMembersController_invite",
+        "summary": "Invite a user to this project (Lead only).",
+        "parameters": [
+          {
+            "name": "projectId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InviteMemberBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "project_members"
+        ]
+      }
+    },
+    "/api/v1/projects/{projectId}/members/{userId}": {
+      "patch": {
+        "operationId": "ProjectMembersController_changeRole",
+        "summary": "Change a member’s role (Lead only).",
+        "parameters": [
+          {
+            "name": "userId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangeRoleBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "project_members"
+        ]
+      },
+      "delete": {
+        "operationId": "ProjectMembersController_remove",
+        "summary": "Remove a member from this project (Lead only).",
+        "parameters": [
+          {
+            "name": "userId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "project_members"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspaceId}/members": {
+      "get": {
+        "operationId": "WorkspaceMembersController_list",
+        "summary": "List workspace members.",
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "type": "object"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "workspace_members"
+        ]
+      },
+      "post": {
+        "operationId": "WorkspaceMembersController_invite",
+        "summary": "Invite a workspace member.",
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InviteWorkspaceMemberBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "workspace_members"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspaceId}/members/{userId}": {
+      "patch": {
+        "operationId": "WorkspaceMembersController_changeRole",
+        "summary": "Change a workspace member role.",
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "userId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangeWorkspaceRoleBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "workspace_members"
+        ]
+      },
+      "delete": {
+        "operationId": "WorkspaceMembersController_remove",
+        "summary": "Remove a workspace member.",
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "userId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "workspace_members"
+        ]
+      }
+    }
+  },
+  "info": {
+    "title": "SyncPath API",
+    "description": "SyncPath backend — see docs/SYNCPATH_DEVELOPMENT_FRAMEWORK_ACCEPTANCE.md §6.1",
+    "version": "0.1.0",
+    "contact": {}
+  },
+  "tags": [
+    {
+      "name": "health",
+      "description": "Liveness probe"
+    },
+    {
+      "name": "identity",
+      "description": "Sessions, registration, current user"
+    },
+    {
+      "name": "workspaces",
+      "description": "Workspace CRUD + membership"
+    },
+    {
+      "name": "projects",
+      "description": "Project CRUD (DEV-008)"
+    },
+    {
+      "name": "entries",
+      "description": "Progress entries (WorkLog successor)"
+    },
+    {
+      "name": "mentions",
+      "description": "Project member mentions and personal notifications"
+    },
+    {
+      "name": "imports",
+      "description": "Legacy JSON import (DEV-007)"
+    }
+  ],
+  "servers": [],
+  "components": {
+    "securitySchemes": {
+      "syncpath_session": {
+        "type": "apiKey",
+        "in": "cookie",
+        "name": "syncpath_session"
+      }
+    },
+    "schemas": {
+      "Function": {
+        "type": "object",
+        "properties": {}
+      },
+      "PublicUser": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "username": {
+            "type": "string",
+            "example": "alice"
+          },
+          "email": {
+            "type": "string",
+            "example": "alice@syncpath.local"
+          },
+          "displayName": {
+            "type": "string",
+            "nullable": true,
+            "example": "Alice Wong"
+          },
+          "createdAt": {
+            "type": "string",
+            "example": "2026-09-16T10:34:55.612Z"
+          }
+        },
+        "required": [
+          "id",
+          "username",
+          "email",
+          "displayName",
+          "createdAt"
+        ]
+      },
+      "SessionResponse": {
+        "type": "object",
+        "properties": {
+          "user": {
+            "$ref": "#/components/schemas/PublicUser"
+          },
+          "expiresAt": {
+            "type": "string",
+            "example": "2026-10-16T10:39:46.279Z"
+          }
+        },
+        "required": [
+          "user",
+          "expiresAt"
+        ]
+      },
+      "PublicWorkspace": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string",
+            "example": "R1 Pilot"
+          },
+          "slug": {
+            "type": "string",
+            "example": "r1-pilot"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "Owner",
+              "Admin",
+              "Member"
+            ]
+          },
+          "createdAt": {
+            "type": "string",
+            "example": "2026-09-16T10:35:05.852Z"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "slug",
+          "role",
+          "createdAt"
+        ]
+      },
+      "PublicProject": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "workspaceId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "startDate": {
+            "type": "string",
+            "example": "2026-01-05"
+          },
+          "endDate": {
+            "type": "string",
+            "example": "2026-03-29"
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "private",
+              "workspace"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "archived"
+            ]
+          },
+          "color": {
+            "type": "string",
+            "example": "#6366f1"
+          },
+          "holidayRegion": {
+            "type": "string",
+            "enum": [
+              "CN",
+              "US",
+              "NONE"
+            ],
+            "nullable": true
+          },
+          "revision": {
+            "type": "number",
+            "minimum": 1
+          },
+          "creatorId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "createdAt": {
+            "type": "string",
+            "example": "2026-09-16T10:49:08.341Z"
+          },
+          "updatedAt": {
+            "type": "string",
+            "example": "2026-09-16T10:49:08.341Z"
+          },
+          "myRole": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              "Lead",
+              "Editor",
+              "Viewer"
+            ],
+            "description": "Caller's role in this project; null if not a member."
+          }
+        },
+        "required": [
+          "id",
+          "workspaceId",
+          "name",
+          "description",
+          "startDate",
+          "endDate",
+          "visibility",
+          "status",
+          "color",
+          "holidayRegion",
+          "revision",
+          "creatorId",
+          "createdAt",
+          "updatedAt",
+          "myRole"
+        ]
+      },
+      "CreateProjectBody": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "example": "R1 Pilot — G1 cohort"
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "startDate": {
+            "type": "string",
+            "example": "2026-01-05"
+          },
+          "endDate": {
+            "type": "string",
+            "example": "2026-03-29"
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "private",
+              "workspace"
+            ],
+            "example": "workspace"
+          },
+          "color": {
+            "type": "string",
+            "example": "#10b981"
+          },
+          "holidayRegion": {
+            "type": "string",
+            "enum": [
+              "CN",
+              "US",
+              "NONE"
+            ],
+            "example": "CN"
+          }
+        },
+        "required": [
+          "name",
+          "startDate",
+          "endDate"
+        ]
+      },
+      "UpdateProjectBody": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "startDate": {
+            "type": "string",
+            "example": "2026-01-05"
+          },
+          "endDate": {
+            "type": "string",
+            "example": "2026-03-29"
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "private",
+              "workspace"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "archived"
+            ]
+          },
+          "color": {
+            "type": "string",
+            "example": "#6366f1"
+          },
+          "holidayRegion": {
+            "type": "string",
+            "enum": [
+              "CN",
+              "US",
+              "NONE"
+            ]
+          },
+          "expectedRevision": {
+            "type": "number",
+            "minimum": 1,
+            "description": "Optimistic-lock revision."
+          }
+        },
+        "required": [
+          "expectedRevision"
+        ]
+      },
+      "PublicEntry": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "projectId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "weekStartDate": {
+            "type": "string",
+            "example": "2026-01-12"
+          },
+          "authorId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "title": {
+            "type": "string"
+          },
+          "level": {
+            "type": "string",
+            "enum": [
+              "primary",
+              "secondary",
+              "minor"
+            ]
+          },
+          "summary": {
+            "type": "string",
+            "nullable": true
+          },
+          "notes": {
+            "type": "string",
+            "nullable": true
+          },
+          "mentionAll": {
+            "type": "boolean"
+          },
+          "mentionedUserIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "completed"
+            ]
+          },
+          "revision": {
+            "type": "number",
+            "minimum": 1
+          },
+          "createdAt": {
+            "type": "string",
+            "example": "2026-09-16T10:49:09.010Z"
+          },
+          "updatedAt": {
+            "type": "string",
+            "example": "2026-09-16T10:49:09.010Z"
+          }
+        },
+        "required": [
+          "id",
+          "projectId",
+          "weekStartDate",
+          "authorId",
+          "title",
+          "level",
+          "summary",
+          "notes",
+          "mentionAll",
+          "mentionedUserIds",
+          "status",
+          "revision",
+          "createdAt",
+          "updatedAt"
+        ]
+      },
+      "CreateEntryBody": {
+        "type": "object",
+        "properties": {
+          "weekStartDate": {
+            "type": "string",
+            "example": "2026-01-12",
+            "description": "YYYY-MM-DD; the server normalises to Monday-aligned week start."
+          },
+          "title": {
+            "type": "string",
+            "example": "Spec draft",
+            "description": "Legacy terminology: WorkLog.author stored the *title*."
+          },
+          "level": {
+            "type": "string",
+            "enum": [
+              "primary",
+              "secondary",
+              "minor"
+            ]
+          },
+          "summary": {
+            "type": "string",
+            "nullable": true
+          },
+          "notes": {
+            "type": "string",
+            "nullable": true
+          },
+          "mentionAll": {
+            "type": "boolean",
+            "description": "Mention every eligible project member."
+          },
+          "mentionedUserIds": {
+            "description": "Explicit project member IDs to mention.",
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "completed"
+            ]
+          }
+        },
+        "required": [
+          "weekStartDate",
+          "title",
+          "level"
+        ]
+      },
+      "UpdateEntryBody": {
+        "type": "object",
+        "properties": {
+          "weekStartDate": {
+            "type": "string",
+            "description": "YYYY-MM-DD week start date."
+          },
+          "title": {
+            "type": "string"
+          },
+          "level": {
+            "type": "string",
+            "enum": [
+              "primary",
+              "secondary",
+              "minor"
+            ]
+          },
+          "summary": {
+            "type": "string",
+            "nullable": true
+          },
+          "notes": {
+            "type": "string",
+            "nullable": true
+          },
+          "mentionAll": {
+            "type": "boolean"
+          },
+          "mentionedUserIds": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "completed"
+            ]
+          },
+          "expectedRevision": {
+            "type": "number",
+            "minimum": 1,
+            "description": "Optimistic-lock revision."
+          }
+        },
+        "required": [
+          "expectedRevision"
+        ]
+      },
+      "MentionCandidateResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "username": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "username",
+          "displayName"
+        ]
+      },
+      "MentionProjectResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ]
+      },
+      "MentionEntryResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "date": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "date"
+        ]
+      },
+      "MentionNotificationResponse": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "workspaceId": {
+            "type": "string"
+          },
+          "project": {
+            "$ref": "#/components/schemas/MentionProjectResponse"
+          },
+          "entry": {
+            "$ref": "#/components/schemas/MentionEntryResponse"
+          },
+          "actor": {
+            "$ref": "#/components/schemas/MentionCandidateResponse"
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "readAt": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "workspaceId",
+          "project",
+          "entry",
+          "actor",
+          "createdAt",
+          "readAt"
+        ]
+      },
+      "InviteMemberBody": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "identifier": {
+            "type": "string",
+            "example": "alex@company.com",
+            "description": "Username or email. Used when userId is not supplied."
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "Lead",
+              "Editor",
+              "Viewer"
+            ]
+          }
+        },
+        "required": [
+          "role"
+        ]
+      },
+      "ChangeRoleBody": {
+        "type": "object",
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": [
+              "Lead",
+              "Editor",
+              "Viewer"
+            ]
+          }
+        },
+        "required": [
+          "role"
+        ]
+      },
+      "InviteWorkspaceMemberBody": {
+        "type": "object",
+        "properties": {
+          "userId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "identifier": {
+            "type": "string",
+            "example": "alex@company.com"
+          },
+          "role": {
+            "type": "string",
+            "enum": [
+              "Owner",
+              "Admin",
+              "Member"
+            ]
+          }
+        },
+        "required": [
+          "role"
+        ]
+      },
+      "ChangeWorkspaceRoleBody": {
+        "type": "object",
+        "properties": {
+          "role": {
+            "type": "string",
+            "enum": [
+              "Owner",
+              "Admin",
+              "Member"
+            ]
+          }
+        },
+        "required": [
+          "role"
+        ]
+      }
+    }
+  }
+}
