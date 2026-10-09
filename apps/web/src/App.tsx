@@ -9,6 +9,7 @@ import { generateRoadmap } from './services/geminiService';
 import { fetchPublicHolidays } from './services/holidayService';
 import { getStartOfWeek, formatDate, parseSafeDate } from './utils/dateUtils';
 import { useLiveCollaboration } from './hooks/useLiveCollaboration';
+import type { ClipboardCard } from './utils/cardClipboard';
 
 const PROJECT_COLORS = ['#6366f1', '#ec4899', '#8b5cf6', '#10b981', '#f59e0b', '#3b82f6'];
 
@@ -127,8 +128,8 @@ export const App: React.FC = () => {
       });
 
       let message = "The Host has ended the live session.";
-      if (removedCount > 0) message += `\n\n• ${removedCount} project(s) removed (You are not in the Team).`;
-      if (keptProjects.length > 0) message += `\n• ${keptProjects.length} project(s) retained as Read-Only.`;
+      if (removedCount > 0) message += `\n\n• ${removedCount} task(s) removed (You are not in the Team).`;
+      if (keptProjects.length > 0) message += `\n• ${keptProjects.length} task(s) retained as Read-Only.`;
 
       return {
         ...current,
@@ -165,10 +166,10 @@ export const App: React.FC = () => {
       target = 'Dashboard';
     } else if (state.view === 'multi-timeline') {
       action = 'Comparing';
-      target = 'Projects';
+      target = 'Tasks';
     } else if (state.view === 'project-form') {
       action = 'Creating';
-      target = 'New Project';
+      target = 'New Task';
     } else if (state.view === 'timeline' && state.selectedProjectId) {
       const proj = state.projects.find(p => p.id === state.selectedProjectId);
       action = 'Viewing';
@@ -394,7 +395,7 @@ export const App: React.FC = () => {
         
         setLegacyDialog({
           title: 'Backup merged',
-          message: 'The data was merged successfully. Newer project and log versions were preserved.',
+          message: 'The data was merged successfully. Newer task and log versions were preserved.',
           tone: 'success'
         });
         
@@ -444,8 +445,8 @@ export const App: React.FC = () => {
   const handleAddProject = async () => {
     if (!newProj.name || !newProj.startDate || !newProj.endDate) {
       setLegacyDialog({
-        title: 'Project details incomplete',
-        message: 'Add a title, start date, and end date before creating the project.',
+        title: 'Task details incomplete',
+        message: 'Add a title, start date, and end date before creating the task.',
         tone: 'warning'
       });
       return;
@@ -689,13 +690,13 @@ export const App: React.FC = () => {
     });
   }, [state.selectedProjectId, modifyState]);
 
-  const handlePasteLogs = useCallback((pastedLogs: WorkLog[], targetDateStr: string | null) => {
+  const handlePasteLogs = useCallback((pastedLogs: ClipboardCard[], targetDateStr: string | null) => {
     if (!state.selectedProjectId || pastedLogs.length === 0) return;
 
     const logsWithNewIds = pastedLogs.map(log => ({
         ...log,
         newId: Math.random().toString(36).substr(2, 9),
-        newGoals: log.goals.map(g => ({ ...g, id: Math.random().toString(36).substr(2, 9) }))
+        newGoals: [] as Goal[]
     }));
 
     modifyState(prev => {
@@ -723,11 +724,14 @@ export const App: React.FC = () => {
           const newLog: WorkLog = {
               ...log,
               id: newId,
+              author: log.title,
+              summary: log.summary ?? '',
+              notes: log.notes ?? '',
               weekStartDate: newDateStr,
               createdAt: Date.now(),
               updatedAt: Date.now(),
               goals: newGoals,
-              isLocked: false 
+              isLocked: false
           };
 
           const existingLogs = projectLogs[newDateStr] || [];
@@ -835,10 +839,10 @@ export const App: React.FC = () => {
       <AppDialog
         open={pendingDeleteProjectId !== null}
         tone="danger"
-        title="Delete this project?"
-        message="The project and its timeline history will be removed from this local workspace."
-        confirmLabel="Delete project"
-        cancelLabel="Keep project"
+        title="Delete this task?"
+        message="The task and its timeline history will be removed from this local project."
+        confirmLabel="Delete task"
+        cancelLabel="Keep task"
         onConfirm={confirmDeleteProject}
         onCancel={() => setPendingDeleteProjectId(null)}
       />
@@ -920,7 +924,7 @@ export const App: React.FC = () => {
           >
             <div className="p-10">
               <h3 className="text-2xl font-black text-slate-800 mb-2">Export Data</h3>
-              <p className="text-slate-400 text-xs font-bold uppercase tracking-widest mb-8">Select project to export as JSON</p>
+              <p className="text-slate-400 text-xs font-bold uppercase tracking-widest mb-8">Select task to export as JSON</p>
 
               <div className="space-y-3 max-h-[400px] overflow-y-auto pr-2">
                 <button 
@@ -932,14 +936,14 @@ export const App: React.FC = () => {
                    </div>
                    <div>
                      <h4 className="font-black text-slate-800 text-sm">Full System Backup</h4>
-                     <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wide">All Projects & Settings</p>
+                     <p className="text-[10px] text-slate-400 font-bold uppercase tracking-wide">All Tasks & Settings</p>
                    </div>
                 </button>
 
                 <div className="h-px bg-slate-100 my-4"></div>
 
                 {state.projects.length === 0 && (
-                   <p className="text-center text-slate-400 text-xs py-4">No individual projects available.</p>
+                   <p className="text-center text-slate-400 text-xs py-4">No individual tasks available.</p>
                 )}
 
                 {state.projects.map(p => (
@@ -1051,7 +1055,7 @@ export const App: React.FC = () => {
               )}
             </div>
             {isAdmin && (
-              <button onClick={() => setState(p => ({ ...p, view: 'project-form' }))} className="px-6 py-3 bg-slate-900 text-white rounded-full font-black text-[10px] uppercase tracking-[0.2em] shadow-md ml-2">New Project</button>
+              <button onClick={() => setState(p => ({ ...p, view: 'project-form' }))} className="px-6 py-3 bg-slate-900 text-white rounded-full font-black text-[10px] uppercase tracking-[0.2em] shadow-md ml-2">New Task</button>
             )}
           </div>
         </nav>
@@ -1067,7 +1071,7 @@ export const App: React.FC = () => {
                   onClick={handleEnterMultiView}
                   className="bg-slate-900 text-white px-8 py-4 rounded-full shadow-2xl flex items-center gap-4 hover:scale-105 transition-transform"
                 >
-                  <span className="font-black text-xs uppercase tracking-widest">Compare {state.selectedMultiIds.length} Projects</span>
+                  <span className="font-black text-xs uppercase tracking-widest">Compare {state.selectedMultiIds.length} Tasks</span>
                   <i className="fas fa-arrow-right"></i>
                 </button>
               </div>
@@ -1117,7 +1121,7 @@ export const App: React.FC = () => {
                   <div className="w-24 h-24 bg-white rounded-[2.5rem] flex items-center justify-center text-slate-200 text-4xl mx-auto mb-8"><i className="fas fa-rocket"></i></div>
                   <h3 className="text-2xl font-black text-slate-400 mb-12">No active roadmaps.</h3>
                   {isAdmin && (
-                    <button onClick={() => setState(p => ({ ...p, view: 'project-form' }))} className="px-12 py-5 bg-slate-900 text-white rounded-full font-black text-[10px] uppercase tracking-[0.2em] shadow-2xl">Start Project</button>
+                    <button onClick={() => setState(p => ({ ...p, view: 'project-form' }))} className="px-12 py-5 bg-slate-900 text-white rounded-full font-black text-[10px] uppercase tracking-[0.2em] shadow-2xl">Start Task</button>
                   )}
                 </div>
               )}
@@ -1156,13 +1160,13 @@ export const App: React.FC = () => {
           <div className="flex-1 overflow-y-auto p-12 flex flex-col items-center">
              <div className="w-full max-w-2xl bg-white p-10 rounded-[2.5rem] shadow-sm border border-slate-100">
                 <header className="flex items-center justify-between mb-8">
-                  <h2 className="text-3xl font-black text-slate-800 tracking-tight">New Project</h2>
+                  <h2 className="text-3xl font-black text-slate-800 tracking-tight">New Task</h2>
                   <button onClick={() => setState(p => ({...p, view: 'dashboard'}))} className="w-10 h-10 rounded-full hover:bg-slate-50 flex items-center justify-center text-slate-400 transition-colors"><i className="fas fa-times"></i></button>
                 </header>
                 
                 <div className="space-y-8">
                    <div>
-                      <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 ml-2">Project Name</label>
+                      <label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-3 ml-2">Task Name</label>
                       <input value={newProj.name} onChange={e => setNewProj(p => ({...p, name: e.target.value}))} placeholder="e.g. Q4 Marketing Campaign" className="w-full px-6 py-4 bg-slate-50 border border-slate-100 rounded-2xl focus:bg-white focus:border-indigo-600 focus:ring-4 focus:ring-indigo-50 outline-none font-bold text-slate-800 transition-all" />
                    </div>
                    
@@ -1206,7 +1210,7 @@ export const App: React.FC = () => {
                       <textarea 
                         value={newProj.description} 
                         onChange={e => setNewProj(p => ({...p, description: e.target.value}))} 
-                        placeholder="Describe the project goals to auto-generate a roadmap..." 
+                        placeholder="Describe the task goals to auto-generate a roadmap..."
                         className="w-full px-6 py-4 bg-slate-50 border border-slate-100 rounded-2xl focus:bg-white focus:border-indigo-600 focus:ring-4 focus:ring-indigo-50 outline-none font-medium text-slate-600 transition-all min-h-[120px]" 
                       />
                    </div>
@@ -1216,7 +1220,7 @@ export const App: React.FC = () => {
                      disabled={isGenerating}
                      className="w-full py-5 bg-indigo-600 text-white rounded-2xl font-black text-xs uppercase tracking-[0.2em] hover:bg-indigo-700 transition-all shadow-xl shadow-indigo-200 disabled:opacity-70 disabled:cursor-not-allowed flex items-center justify-center gap-2"
                    >
-                     {isGenerating ? <><i className="fas fa-magic fa-spin"></i> Generating...</> : 'Create Project'}
+                     {isGenerating ? <><i className="fas fa-magic fa-spin"></i> Generating...</> : 'Create Task'}
                    </button>
                 </div>
              </div>

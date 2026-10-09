@@ -8,6 +8,7 @@ import { PrismaService } from '../../common/prisma/prisma.service';
 import { newProgressEntryId } from '@syncpath/domain';
 import { parseSafeDate } from '../../common/dates';
 import type { CreateEntryBody, ProgressLevel, UpdateEntryBody } from './dto';
+import { ENTRY_LOCKED_DELETE_MESSAGE, ENTRY_LOCKED_UPDATE_MESSAGE, isLockedUpdateRejected } from './entryLock';
 import { MentionsService } from '../mentions/mentions.service';
 
 @Injectable()
@@ -117,6 +118,7 @@ export class EntriesService {
         message: `expectedRevision ${expectedRevision} does not match current ${input.entry.revision}.`
       });
     }
+    this.assertUnlocked(input.entry, changes);
     const data: Record<string, unknown> = {
       revision: input.entry.revision + 1
     };
@@ -135,6 +137,7 @@ export class EntriesService {
     if (changes.summary !== undefined) data.summary = changes.summary;
     if (changes.notes !== undefined) data.notes = changes.notes;
     if (changes.status !== undefined) data.status = changes.status;
+    if (changes.isLocked !== undefined) data.isLocked = changes.isLocked;
 
     let rows: ReturnType<MentionsService['notificationRows']> = [];
     if (changes.mentionAll !== undefined || changes.mentionedUserIds !== undefined) {
@@ -177,11 +180,34 @@ export class EntriesService {
     return updated;
   }
 
-  async softDelete(input: { entry: ProgressEntry }): Promise<void> {
-    await this.prisma.progressEntry.update({
-      where: { id: input.entry.id },
+  async softDelete(input: { entry: ProgressEntry; expectedRevision?: number }): Promise<void> {
+    if (input.entry.isLocked) {
+      throw new ConflictException({
+        code: 'entry_locked',
+        message: ENTRY_LOCKED_DELETE_MESSAGE
+      });
+    }
+    // A delete is a write too: without the optimistic-lock check a stale tab
+    // could silently discard a teammate's just-saved edit.
+    if (
+      input.expectedRevision !== undefined &&
+      input.expectedRevision !== input.entry.revision
+    ) {
+      throw new ConflictException({
+        code: 'revision_conflict',
+        message: `expectedRevision ${input.expectedRevision} does not match current ${input.entry.revision}.`
+      });
+    }
+    const result = await this.prisma.progressEntry.updateMany({
+      where: { id: input.entry.id, revision: input.entry.revision, deletedAt: null },
       data: { deletedAt: new Date() }
     });
+    if (result.count === 0) {
+      throw new ConflictException({
+        code: 'revision_conflict',
+        message: 'The card changed while you were reviewing it.'
+      });
+    }
   }
 
   /**
@@ -257,6 +283,24 @@ export class EntriesService {
     throw new ConflictException({
       code: 'invalid_level',
       message: 'level must be primary|secondary|minor (or 1|2|3).'
+    });
+  }
+
+  /**
+   * A locked card is immutable. This is the server-side authority behind the
+   * lock: the UI disables dragging and the editor, but a stale tab, a replayed
+   * request, or a second client would otherwise still get through.
+   *
+   * The lock flag itself stays writable — that is how a card gets unlocked —
+   * and a PATCH carrying nothing but the flag is accepted in either direction.
+   * Anything that touches content, date (a move), level, status, or mentions
+   * while the lock is set is a 409.
+   */
+  private assertUnlocked(entry: ProgressEntry, changes: Omit<UpdateEntryBody, 'expectedRevision'>): void {
+    if (!isLockedUpdateRejected(entry.isLocked, changes)) return;
+    throw new ConflictException({
+      code: 'entry_locked',
+      message: ENTRY_LOCKED_UPDATE_MESSAGE
     });
   }
 }

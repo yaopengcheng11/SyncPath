@@ -81,7 +81,7 @@ const ProjectFormDialog: React.FC<{
     const submitted = { ...draft, startDate: String(fields.get('startDate') ?? draft.startDate), endDate: String(fields.get('endDate') ?? draft.endDate) };
     setDraft(submitted);
     if (!submitted.name.trim() || !submitted.startDate || !submitted.endDate) {
-      setError(t('Choose a workspace and fill in the project name, start date, and end date.'));
+      setError(t('Choose a project and fill in the task name, start date, and end date.'));
       return;
     }
     if (submitted.endDate < submitted.startDate) {
@@ -94,7 +94,7 @@ const ProjectFormDialog: React.FC<{
     try {
       await onSubmit(submitted);
     } catch {
-      setError(t('Could not create this project. Your details are kept here. Please try again.'));
+      setError(t('Could not create this task. Your details are kept here. Please try again.'));
     } finally {
       savingRef.current = false;
       setSaving(false);
@@ -109,14 +109,14 @@ const ProjectFormDialog: React.FC<{
           <header className="flex items-center justify-between gap-4 bg-slate-900 px-6 py-5 text-white sm:px-8">
             <div>
               <p className="text-xs text-indigo-200">{workspace.name}</p>
-              <h2 id={titleId} className="mt-1 text-xl font-bold">{t('New Project')}</h2>
+              <h2 id={titleId} className="mt-1 text-xl font-bold">{t('New Task')}</h2>
             </div>
             <button type="button" onClick={() => closeRef.current()} disabled={saving} aria-label={t('Close dialog')} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/10 text-slate-200 hover:bg-white/20 disabled:opacity-40"><i className="fas fa-times" /></button>
           </header>
           <form onSubmit={submit} className="overflow-y-auto p-6 sm:p-8" noValidate>
             <fieldset disabled={saving} className="space-y-5">
               <label className="block text-xs font-bold text-slate-600">
-                {t('Project name')}
+                {t('Task name')}
                 <input ref={nameRef} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder={t('e.g. AI assistant launch')} className={`mt-2 ${inputClass}`} />
               </label>
               <div className="grid grid-cols-2 gap-4">
@@ -126,11 +126,11 @@ const ProjectFormDialog: React.FC<{
               <label className="block text-xs font-bold text-slate-600">{t('Description')}<textarea rows={3} value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} placeholder={t('Optional context for the team')} className={`mt-2 resize-y ${inputClass}`} /></label>
             </fieldset>
             {error && <p role="alert" className="mt-4 rounded-xl bg-red-50 p-3 text-sm text-red-600">{error}</p>}
-            <div className="mt-6 flex justify-end"><button type="submit" disabled={saving || !draft.name.trim()} className="rounded-xl bg-indigo-600 px-6 py-3 text-sm font-bold text-white transition hover:bg-indigo-700 disabled:opacity-40">{saving ? t('Creating…') : t('Create Project')}</button></div>
+            <div className="mt-6 flex justify-end"><button type="submit" disabled={saving || !draft.name.trim()} className="rounded-xl bg-indigo-600 px-6 py-3 text-sm font-bold text-white transition hover:bg-indigo-700 disabled:opacity-40">{saving ? t('Creating…') : t('Create Task')}</button></div>
           </form>
         </div>
       </div>
-      <AppDialog open={confirmDiscard} tone="warning" title={t('Discard project details?')} message={t('This project has not been created. Your unsaved details will be discarded.')} confirmLabel={t('Discard')} cancelLabel={t('Keep editing')} onConfirm={onClose} onCancel={() => setConfirmDiscard(false)} />
+      <AppDialog open={confirmDiscard} tone="warning" title={t('Discard task details?')} message={t('This task has not been created. Your unsaved details will be discarded.')} confirmLabel={t('Discard')} cancelLabel={t('Keep editing')} onConfirm={onClose} onCancel={() => setConfirmDiscard(false)} />
     </>
   );
 };

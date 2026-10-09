@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, HttpCode, Param, Post, Sse, UseGuards } from '@nestjs/common';
+import { Body, Controller, Delete, HttpCode, Param, Post, Query, Sse, UseGuards } from '@nestjs/common';
 import { ApiExcludeEndpoint, ApiProperty, ApiTags } from '@nestjs/swagger';
 import { Observable } from 'rxjs';
 import type { User } from '@prisma/client';
@@ -12,6 +12,9 @@ class PresenceBody {
 
   @ApiProperty({ required: false, nullable: true, format: 'uuid' })
   targetId?: string | null;
+
+  @ApiProperty({ required: false, description: 'Opaque token identifying this browser connection.' })
+  clientId?: string;
 }
 
 @ApiTags('collaboration')
@@ -39,7 +42,7 @@ export class CollaborationController {
     @ProjectContextParam() ctx: { project: { id: string } },
     @Body() body: PresenceBody
   ): void {
-    this.collaboration.heartbeat({ projectId: ctx.project.id, user, action: body.action, targetId: body.targetId });
+    this.collaboration.heartbeat({ projectId: ctx.project.id, user, action: body.action, targetId: body.targetId, clientId: body.clientId });
   }
 
   @Delete('presence')
@@ -47,8 +50,9 @@ export class CollaborationController {
   @ApiExcludeEndpoint()
   leave(
     @CurrentUser() user: User,
-    @ProjectContextParam() ctx: { project: { id: string } }
+    @ProjectContextParam() ctx: { project: { id: string } },
+    @Query('clientId') clientId?: string
   ): void {
-    this.collaboration.leave(ctx.project.id, user);
+    this.collaboration.leave(ctx.project.id, user, clientId);
   }
 }

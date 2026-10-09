@@ -47,6 +47,9 @@ export interface ApiData extends ApiDataState {
   signIn: (user: PublicUser) => Promise<void>;
   signOut: () => Promise<void>;
   refreshWorkspaces: () => Promise<void>;
+  createWorkspace: (
+    body: Parameters<typeof apiClient.createWorkspace>[0]
+  ) => Promise<PublicWorkspace>;
   updateWorkspace: (
     workspaceId: string,
     body: Parameters<typeof apiClient.updateWorkspace>[1]
@@ -66,6 +69,10 @@ export interface ApiData extends ApiDataState {
       visibility?: 'private' | 'workspace';
     }
   ) => Promise<PublicProject>;
+  updateProject: (
+    projectId: string,
+    body: Parameters<typeof apiClient.updateProject>[1]
+  ) => Promise<PublicProject>;
   deleteProject: (projectId: string) => Promise<void>;
   createEntry: (
     projectId: string,
@@ -81,7 +88,7 @@ export interface ApiData extends ApiDataState {
     }
   ) => Promise<PublicEntry>;
   updateEntry: (projectId: string, entryId: string, body: Parameters<typeof apiClient.updateEntry>[1]) => Promise<PublicEntry>;
-  deleteEntry: (projectId: string, entryId: string) => Promise<void>;
+  deleteEntry: (projectId: string, entryId: string, expectedRevision?: number) => Promise<void>;
   importLegacyJson: (
     body: Record<string, unknown>,
     opts?: { accept?: boolean; workspaceName?: string }
@@ -171,6 +178,19 @@ export function useApiData(): ApiData {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [safeSet]);
 
+  const createWorkspace = useCallback(
+    async (body: Parameters<typeof apiClient.createWorkspace>[0]): Promise<PublicWorkspace> => {
+      const created = await apiClient.createWorkspace(body);
+      safeSet((s) => ({
+        ...s,
+        workspaces: [...s.workspaces.filter((workspace) => workspace.id !== created.id), created],
+        error: null
+      }));
+      return created;
+    },
+    [safeSet]
+  );
+
   const updateWorkspace = useCallback(
     async (
       workspaceId: string,
@@ -249,6 +269,30 @@ export function useApiData(): ApiData {
     [safeSet]
   );
 
+  const updateProject = useCallback(
+    async (
+      projectId: string,
+      body: Parameters<typeof apiClient.updateProject>[1]
+    ): Promise<PublicProject> => {
+      const updated = await apiClient.updateProject(projectId, body);
+      safeSet((s) => {
+        // The project cache is keyed by workspace id, so rewrite the entry in
+        // whichever workspace list actually holds this project.
+        const next: typeof s.projects = { ...s.projects };
+        for (const [workspaceId, list] of Object.entries(next)) {
+          if (list.some((project) => project.id === projectId)) {
+            next[workspaceId] = list.map((project) =>
+              project.id === projectId ? updated : project
+            );
+          }
+        }
+        return { ...s, projects: next };
+      });
+      return updated;
+    },
+    [safeSet]
+  );
+
   const deleteProject = useCallback(
     async (projectId: string): Promise<void> => {
       await apiClient.deleteProject(projectId);
@@ -289,8 +333,8 @@ export function useApiData(): ApiData {
     return updated;
   }, [safeSet]);
 
-  const deleteEntry = useCallback(async (projectId: string, entryId: string) => {
-    await apiClient.deleteEntry(entryId);
+  const deleteEntry = useCallback(async (projectId: string, entryId: string, expectedRevision?: number) => {
+    await apiClient.deleteEntry(entryId, expectedRevision);
     safeSet((s) => ({ ...s, entries: { ...s.entries, [projectId]: (s.entries[projectId] ?? []).filter((e) => e.id !== entryId) } }));
   }, [safeSet]);
 
@@ -328,11 +372,13 @@ export function useApiData(): ApiData {
       signIn,
       signOut,
       refreshWorkspaces,
+      createWorkspace,
       updateWorkspace,
       deleteWorkspace,
       refreshProjects,
       refreshEntries,
       createProject,
+      updateProject,
       deleteProject,
       createEntry,
       updateEntry,
@@ -344,11 +390,13 @@ export function useApiData(): ApiData {
       signIn,
       signOut,
       refreshWorkspaces,
+      createWorkspace,
       updateWorkspace,
       deleteWorkspace,
       refreshProjects,
       refreshEntries,
       createProject,
+      updateProject,
       deleteProject,
       createEntry,
       updateEntry,

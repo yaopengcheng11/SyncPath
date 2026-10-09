@@ -292,6 +292,16 @@ export class ProjectsService {
       }
       data.endDate = d;
     }
+    // Same rule create() enforces: without this an update could invert the
+    // timeline range that create() refuses to accept.
+    const nextStart = (data.startDate as Date | undefined) ?? input.project.startDate;
+    const nextEnd = (data.endDate as Date | undefined) ?? input.project.endDate;
+    if (nextEnd.getTime() < nextStart.getTime()) {
+      throw new ConflictException({
+        code: 'invalid_range',
+        message: 'endDate must be on or after startDate.'
+      });
+    }
     if (input.changes.visibility !== undefined) data.visibility = input.changes.visibility;
     if (input.changes.status !== undefined) data.status = input.changes.status;
     if (input.changes.color !== undefined) data.color = input.changes.color;

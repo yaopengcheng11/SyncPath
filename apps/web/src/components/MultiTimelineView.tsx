@@ -15,7 +15,7 @@ const MultiTimelineView: React.FC<MultiTimelineViewProps> = ({ projects, logs, o
     <div className="flex flex-col h-screen bg-slate-50 overflow-hidden">
       <header className="px-12 py-6 border-b border-slate-200 bg-white z-20 shadow-sm flex items-center justify-between shrink-0">
         <div className="flex items-center gap-4">
-          <button onClick={onBack} className="w-10 h-10 bg-slate-100 hover:bg-slate-200 rounded-xl flex items-center justify-center text-slate-500 transition-all">
+          <button onClick={onBack} aria-label={t('Back to tasks')} className="w-10 h-10 bg-slate-100 hover:bg-slate-200 rounded-xl flex items-center justify-center text-slate-500 transition-all">
             <i className="fas fa-arrow-left"></i>
           </button>
           <div>
@@ -23,7 +23,7 @@ const MultiTimelineView: React.FC<MultiTimelineViewProps> = ({ projects, logs, o
             <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{t('Interactive Mode: Space + Wheel to Zoom • Space + Drag to Pan')}</p>
           </div>
           <div className="px-3 py-1 bg-indigo-50 text-indigo-600 rounded-lg text-[10px] font-black uppercase tracking-widest">
-            {projects.length} {t('Projects')}
+            {projects.length} {t('Tasks')}
           </div>
         </div>
       </header>
@@ -53,7 +53,7 @@ const MultiTimelineView: React.FC<MultiTimelineViewProps> = ({ projects, logs, o
         {projects.length === 0 && (
             <div className="flex flex-col items-center justify-center h-full text-slate-400">
                 <i className="fas fa-layer-group text-4xl mb-4 opacity-20"></i>
-                <p className="text-sm font-bold uppercase tracking-widest opacity-40">{t('No projects selected')}</p>
+                <p className="text-sm font-bold uppercase tracking-widest opacity-40">{t('No tasks selected')}</p>
             </div>
         )}
       </div>

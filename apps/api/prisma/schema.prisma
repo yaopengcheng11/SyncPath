@@ -45,6 +45,7 @@ model User {
   projectMemberships ProjectMember[]
   receivedMentions   MentionNotification[] @relation("MentionRecipient")
   sentMentions       MentionNotification[] @relation("MentionActor")
+  createdShareLinks  ShareLink[]           @relation("ShareLinkCreator")
 
   @@index([email])
   @@index([status])
@@ -103,6 +104,7 @@ model Workspace {
   memberships          Membership[]
   projects             Project[]
   mentionNotifications MentionNotification[]
+  shareLinks           ShareLink[]
 
   @@index([ownerId])
   @@map("workspaces")
@@ -159,11 +161,34 @@ model Project {
   members              ProjectMember[]
   entries              ProgressEntry[]
   mentionNotifications MentionNotification[]
+  shareLinks           ShareLink[]
 
+  @@unique([id, workspaceId])
   @@index([workspaceId])
   @@index([creatorId])
   @@index([status])
   @@map("projects")
+}
+
+// Share recipients use a separate read-only route; a link grants no membership.
+// Only a hash is persisted. A composite foreign key prevents cross-tenant links.
+model ShareLink {
+  id          String    @id
+  workspaceId String    @map("workspace_id")
+  projectId   String?   @map("project_id")
+  creatorId   String    @map("creator_id")
+  tokenHash   String    @unique @map("token_hash")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  revokedAt   DateTime? @map("revoked_at")
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  project   Project?  @relation(fields: [projectId, workspaceId], references: [id, workspaceId], onDelete: Cascade)
+  creator   User      @relation("ShareLinkCreator", fields: [creatorId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, createdAt])
+  @@index([projectId, createdAt])
+  @@index([creatorId])
+  @@map("share_links")
 }
 
 model ProjectMember {
@@ -210,6 +235,10 @@ model ProgressEntry {
   notes            String?
   mentionAll       Boolean             @default(false) @map("mention_all")
   mentionedUserIds String[]            @default([]) @map("mentioned_user_ids")
+  // A locked card is immutable: no moves, no content edits, no deletes.
+  // Only the unlock itself is accepted while the flag is set. Enforced in
+  // EntriesService.update / softDelete, not just in the UI.
+  isLocked         Boolean             @default(false) @map("is_locked")
   status           ProgressEntryStatus @default(pending)
   revision         Int                 @default(1)
   createdAt        DateTime            @default(now()) @map("created_at")

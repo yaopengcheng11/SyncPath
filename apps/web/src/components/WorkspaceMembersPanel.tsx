@@ -30,7 +30,7 @@ const WorkspaceMembersPanel: React.FC<Props> = ({ workspaceId, workspaceName, cu
       setMembers(await apiClient.listWorkspaceMembers(workspaceId));
       setError(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('Unable to load workspace members.'));
+      setError(err instanceof Error ? err.message : t('Unable to load project members.'));
     } finally {
       setLoading(false);
     }
@@ -58,7 +58,7 @@ const WorkspaceMembersPanel: React.FC<Props> = ({ workspaceId, workspaceName, cu
       await apiClient.changeWorkspaceMemberRole(workspaceId, member.user.id, nextRole);
       setMembers((current) => current.map((item) => item.user.id === member.user.id ? { ...item, role: nextRole } : item));
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('Unable to change workspace role.'));
+      setError(err instanceof Error ? err.message : t('Unable to change project role.'));
     }
   };
 
@@ -68,7 +68,7 @@ const WorkspaceMembersPanel: React.FC<Props> = ({ workspaceId, workspaceName, cu
       setMembers((current) => current.filter((item) => item.user.id !== member.user.id));
       setPendingRemoval(null);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('Unable to remove workspace member.'));
+      setError(err instanceof Error ? err.message : t('Unable to remove project member.'));
     }
   };
 
@@ -77,16 +77,16 @@ const WorkspaceMembersPanel: React.FC<Props> = ({ workspaceId, workspaceName, cu
       <aside className="w-full max-w-xl h-full bg-white shadow-2xl flex flex-col" onMouseDown={(event) => event.stopPropagation()}>
         <header className="px-8 py-7 border-b border-slate-100 flex items-start justify-between">
           <div>
-            <p className="text-[10px] font-black uppercase tracking-[0.22em] text-indigo-500">{t('Workspace access')}</p>
-            <h2 className="text-2xl font-black text-slate-900 mt-1">{t('Team members')}</h2>
+            <p className="text-[10px] font-black uppercase tracking-[0.22em] text-indigo-500">{t('Project access')}</p>
+            <h2 className="text-2xl font-black text-slate-900 mt-1">{t('Project members')}</h2>
             <p className="text-sm text-slate-500 mt-1">{workspaceName}</p>
           </div>
-          <button onClick={onClose} className="w-10 h-10 rounded-xl hover:bg-slate-100 text-slate-400" aria-label={t('Close workspace members panel')}><i className="fas fa-times"></i></button>
+          <button onClick={onClose} className="w-10 h-10 rounded-xl hover:bg-slate-100 text-slate-400" aria-label={t('Close project members panel')}><i className="fas fa-times"></i></button>
         </header>
         <div className="px-8 py-5 border-b border-slate-100 bg-slate-50/70 grid grid-cols-3 gap-3 text-xs">
-          <RoleHint role={t('Owner')} text={t('Full workspace control and ownership')} />
-          <RoleHint role={t('Admin')} text={t('Manage members and projects')} />
-          <RoleHint role={t('Member')} text={t('Participate in workspace projects')} />
+          <RoleHint role={t('Owner')} text={t('Full project control and ownership')} />
+          <RoleHint role={t('Admin')} text={t('Manage members and tasks')} />
+          <RoleHint role={t('Member')} text={t('Participate in project tasks')} />
         </div>
         {canManage && (
           <form onSubmit={invite} className="px-8 py-6 border-b border-slate-100">
@@ -125,7 +125,7 @@ const WorkspaceMembersPanel: React.FC<Props> = ({ workspaceId, workspaceName, cu
         open={pendingRemoval !== null}
         tone="danger"
         title={t('Remove team member?')}
-        message={pendingRemoval ? t('Remove @{{username}} from {{workspace}}? They will lose access to this workspace and its projects.', { username: pendingRemoval.user.username, workspace: workspaceName }) : undefined}
+        message={pendingRemoval ? t('Remove @{{username}} from {{workspace}}? They will lose access to this project and its tasks.', { username: pendingRemoval.user.username, workspace: workspaceName }) : undefined}
         confirmLabel={t('Remove member')}
         cancelLabel={t('Keep member')}
         onConfirm={() => {

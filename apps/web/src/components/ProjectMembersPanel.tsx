@@ -3,12 +3,15 @@ import type { ProjectRole, PublicProjectMember } from '@syncpath/api-client';
 import { apiClient } from '../services/api';
 import AppDialog from './AppDialog';
 import { useI18n } from '../i18n';
+import { isProjectMemberOnline, type OnlineProjectUser } from './projectPresenceState';
 
 interface ProjectMembersPanelProps {
   projectId: string;
   projectName: string;
   currentUserId: string;
   canManage: boolean;
+  onlineUsers?: OnlineProjectUser[];
+  presenceConnected?: boolean;
   onClose: () => void;
 }
 
@@ -19,6 +22,8 @@ const ProjectMembersPanel: React.FC<ProjectMembersPanelProps> = ({
   projectName,
   currentUserId,
   canManage,
+  onlineUsers = [],
+  presenceConnected = false,
   onClose
 }) => {
   const { t } = useI18n();
@@ -93,13 +98,14 @@ const ProjectMembersPanel: React.FC<ProjectMembersPanelProps> = ({
       <aside
         className="w-full max-w-xl h-full bg-white shadow-2xl flex flex-col"
         onMouseDown={(event) => event.stopPropagation()}
-        aria-label={t('Project members and permissions')}
+        aria-label={t('Task members and permissions')}
       >
         <header className="px-8 py-7 border-b border-slate-100 flex items-start justify-between">
           <div>
             <p className="text-[10px] font-black uppercase tracking-[0.22em] text-indigo-500">{t('Team access')}</p>
-            <h2 className="text-2xl font-black text-slate-900 mt-1">{t('Members & permissions')}</h2>
+            <h2 className="text-2xl font-black text-slate-900 mt-1">{t('Task members and permissions')}</h2>
             <p className="text-sm text-slate-500 mt-1">{projectName}</p>
+            <p className="text-xs text-slate-500 mt-2 leading-5">{t('Project membership and task membership are managed separately. Invite project members here to collaborate on this task.')}</p>
           </div>
           <button onClick={onClose} className="w-10 h-10 rounded-xl hover:bg-slate-100 text-slate-400" aria-label={t('Close members panel')}>
             <i className="fas fa-times"></i>
@@ -107,9 +113,9 @@ const ProjectMembersPanel: React.FC<ProjectMembersPanelProps> = ({
         </header>
 
         <div className="px-8 py-5 border-b border-slate-100 bg-slate-50/70 grid grid-cols-3 gap-3 text-xs">
-          <RoleHint role={t('Lead')} text={t('Project settings, members and all content')} />
-          <RoleHint role={t('Editor')} text={t('Create and edit project content')} />
-          <RoleHint role={t('Viewer')} text={t('Read-only access to project content')} />
+          <RoleHint role={t('Lead')} text={t('Task settings, members and all content')} />
+          <RoleHint role={t('Editor')} text={t('Create and edit task content')} />
+          <RoleHint role={t('Viewer')} text={t('Read-only access to task content')} />
         </div>
 
         {canManage && (
@@ -139,14 +145,20 @@ const ProjectMembersPanel: React.FC<ProjectMembersPanelProps> = ({
         {error && <div className="mx-8 mt-5 px-4 py-3 rounded-xl bg-red-50 text-red-700 text-sm">{error}</div>}
 
         <div className="flex-1 overflow-y-auto px-8 py-6">
+          <p className="mb-4 text-xs leading-5 text-slate-500" role="status">
+            {presenceConnected
+              ? t('Online means this task is open.') + ' ' + t('Offline means this task is not currently open.')
+              : t('Online status is temporarily unavailable. Reconnecting…')}
+          </p>
           {loading ? (
             <p className="text-sm text-slate-400">{t('Loading members…')}</p>
           ) : members.length === 0 ? (
-            <p className="text-sm text-slate-400">{t('No project members yet.')}</p>
+            <p className="text-sm text-slate-400">{t('No task members yet.')}</p>
           ) : (
             <div className="space-y-3">
               {members.map((member) => {
                 const isSelf = member.user.id === currentUserId;
+                const online = presenceConnected && isProjectMemberOnline(member.user, onlineUsers);
                 return (
                   <div key={member.user.id} className="flex items-center gap-4 p-4 border border-slate-100 rounded-2xl">
                     <div className="w-10 h-10 rounded-full bg-indigo-100 text-indigo-700 flex items-center justify-center font-black">
@@ -158,6 +170,10 @@ const ProjectMembersPanel: React.FC<ProjectMembersPanelProps> = ({
                         {isSelf && <span className="text-[9px] font-black uppercase text-indigo-500">{t('You')}</span>}
                       </div>
                       <p className="text-xs text-slate-400 truncate">@{member.user.username} · {member.user.email}</p>
+                      <p className={`mt-1 flex items-center gap-1.5 text-[10px] font-bold ${online ? 'text-emerald-600' : 'text-slate-400'}`}>
+                        <span className={`h-1.5 w-1.5 rounded-full ${online ? 'bg-emerald-500' : 'bg-slate-300'}`} aria-hidden="true" />
+                        {t(!presenceConnected ? 'Status unavailable' : online ? 'Online' : 'Offline')}
+                      </p>
                     </div>
                     <select
                       value={member.role}
@@ -182,8 +198,8 @@ const ProjectMembersPanel: React.FC<ProjectMembersPanelProps> = ({
       <AppDialog
         open={pendingRemoval !== null}
         tone="danger"
-        title={t('Remove project member?')}
-        message={pendingRemoval ? t('Remove @{{username}} from {{project}}? They will no longer be able to access this project.', { username: pendingRemoval.user.username, project: projectName }) : undefined}
+        title={t('Remove task member?')}
+        message={pendingRemoval ? t('Remove @{{username}} from {{project}}? They will no longer be able to access this task.', { username: pendingRemoval.user.username, project: projectName }) : undefined}
         confirmLabel={t('Remove member')}
         cancelLabel={t('Keep member')}
         onConfirm={() => {

@@ -52,6 +52,10 @@ export interface PublicWorkspaceMember {
   role: WorkspaceRole;
   createdAt: string;
 }
+
+export type ShareLinkMetadata = components['schemas']['PublicShareLink'];
+export type CreatedShareLink = components['schemas']['CreatedShareLink'];
+export type SharedContent = components['schemas']['SharedContent'];
 export type RegisterBody = {
   email: string;
   username: string;
@@ -214,8 +218,12 @@ export class ApiClient {
     return this.request<PublicEntry>('PATCH', `/entries/${entryId}`, body);
   }
 
-  async deleteEntry(entryId: string): Promise<void> {
-    await this.request<null>('DELETE', `/entries/${entryId}`);
+  async deleteEntry(entryId: string, expectedRevision?: number): Promise<void> {
+    const query =
+      expectedRevision === undefined
+        ? ''
+        : `?expectedRevision=${encodeURIComponent(String(expectedRevision))}`;
+    await this.request<null>('DELETE', `/entries/${entryId}${query}`);
   }
 
   // ─── project members ─────────────────────────────────────────────
@@ -255,15 +263,43 @@ export class ApiClient {
     await this.request<null>('DELETE', `/projects/${projectId}/members/${userId}`);
   }
 
+  // ─── authenticated read-only sharing ──────────────────────────────
+
+  createWorkspaceShareLink(workspaceId: string): Promise<CreatedShareLink> {
+    return this.request('POST', `/workspaces/${encodeURIComponent(workspaceId)}/share-links`);
+  }
+
+  listWorkspaceShareLinks(workspaceId: string): Promise<ShareLinkMetadata[]> {
+    return this.request('GET', `/workspaces/${encodeURIComponent(workspaceId)}/share-links`);
+  }
+
+  createProjectShareLink(projectId: string): Promise<CreatedShareLink> {
+    return this.request('POST', `/projects/${encodeURIComponent(projectId)}/share-links`);
+  }
+
+  listProjectShareLinks(projectId: string): Promise<ShareLinkMetadata[]> {
+    return this.request('GET', `/projects/${encodeURIComponent(projectId)}/share-links`);
+  }
+
+  async revokeShareLink(id: string): Promise<void> {
+    await this.request<null>('DELETE', `/share-links/${encodeURIComponent(id)}`);
+  }
+
+  resolveShareLink(token: string, options?: { signal?: AbortSignal }): Promise<SharedContent> {
+    return this.request('POST', '/share-links/resolve', { token }, options);
+  }
+
   // ─── internals ────────────────────────────────────────────────────
 
   private async request<T>(
     method: string,
     path: string,
-    body?: unknown
+    body?: unknown,
+    options?: { signal?: AbortSignal }
   ): Promise<T> {
     const init: RequestInit = {
       method,
+      signal: options?.signal,
       credentials: this.credentials,
       headers: body !== undefined ? { 'Content-Type': 'application/json' } : {}
     };

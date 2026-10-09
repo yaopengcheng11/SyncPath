@@ -698,12 +698,21 @@
       },
       "delete": {
         "operationId": "EntryActionsController_remove",
-        "summary": "Soft-delete a progress entry.",
+        "summary": "Soft-delete a progress entry (revision-checked via expectedRevision).",
         "parameters": [
           {
             "name": "id",
             "required": true,
             "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "expectedRevision",
+            "required": false,
+            "in": "query",
+            "description": "Optimistic-lock revision of the card the caller last saw.",
             "schema": {
               "type": "string"
             }
@@ -1078,6 +1087,188 @@
         },
         "tags": [
           "workspace_members"
+        ]
+      }
+    },
+    "/api/v1/workspaces/{workspaceId}/share-links": {
+      "post": {
+        "operationId": "SharingController_createWorkspace",
+        "summary": "Create a read-only share link for a workspace (administrator only).",
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreatedShareLink"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "sharing"
+        ]
+      },
+      "get": {
+        "operationId": "SharingController_listWorkspace",
+        "summary": "List workspace share metadata; raw tokens are never returned.",
+        "parameters": [
+          {
+            "name": "workspaceId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PublicShareLink"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "sharing"
+        ]
+      }
+    },
+    "/api/v1/projects/{projectId}/share-links": {
+      "post": {
+        "operationId": "SharingController_createProject",
+        "summary": "Create a read-only share link for one project (Lead or workspace administrator).",
+        "parameters": [
+          {
+            "name": "projectId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreatedShareLink"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "sharing"
+        ]
+      },
+      "get": {
+        "operationId": "SharingController_listProject",
+        "summary": "List project share metadata; raw tokens are never returned.",
+        "parameters": [
+          {
+            "name": "projectId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/PublicShareLink"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "sharing"
+        ]
+      }
+    },
+    "/api/v1/share-links/{id}": {
+      "delete": {
+        "operationId": "SharingController_revoke",
+        "summary": "Revoke a link using current management permission on its actual target.",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": ""
+          }
+        },
+        "tags": [
+          "sharing"
+        ]
+      }
+    },
+    "/api/v1/share-links/resolve": {
+      "post": {
+        "operationId": "SharingController_resolve",
+        "summary": "Resolve shared read-only content after authentication; token is sent in the body.",
+        "parameters": [],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolveShareLinkBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SharedContent"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "sharing"
         ]
       }
     }
@@ -1470,6 +1661,10 @@
               "completed"
             ]
           },
+          "isLocked": {
+            "type": "boolean",
+            "description": "Locked cards cannot be moved, edited, or deleted."
+          },
           "revision": {
             "type": "number",
             "minimum": 1
@@ -1495,6 +1690,7 @@
           "mentionAll",
           "mentionedUserIds",
           "status",
+          "isLocked",
           "revision",
           "createdAt",
           "updatedAt"
@@ -1595,6 +1791,10 @@
               "pending",
               "completed"
             ]
+          },
+          "isLocked": {
+            "type": "boolean",
+            "description": "Toggle the lock. The only field a locked card accepts; every other change is rejected while the lock is set."
           },
           "expectedRevision": {
             "type": "number",
@@ -1775,6 +1975,130 @@
         },
         "required": [
           "role"
+        ]
+      },
+      "CreatedShareLink": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "workspace",
+              "project"
+            ]
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "revokedAt": {
+            "type": "string",
+            "nullable": true
+          },
+          "token": {
+            "type": "string",
+            "description": "Opaque capability returned only once; place it in the URL fragment."
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "createdAt",
+          "revokedAt",
+          "token"
+        ]
+      },
+      "PublicShareLink": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "workspace",
+              "project"
+            ]
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "revokedAt": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "createdAt",
+          "revokedAt"
+        ]
+      },
+      "ResolveShareLinkBody": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string",
+            "description": "Opaque token from the shared URL fragment."
+          }
+        },
+        "required": [
+          "token"
+        ]
+      },
+      "SharedWorkspace": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ]
+      },
+      "SharedContent": {
+        "type": "object",
+        "properties": {
+          "kind": {
+            "type": "string",
+            "enum": [
+              "workspace",
+              "project"
+            ]
+          },
+          "workspace": {
+            "$ref": "#/components/schemas/SharedWorkspace"
+          },
+          "projects": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PublicProject"
+            }
+          },
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PublicEntry"
+            }
+          }
+        },
+        "required": [
+          "kind",
+          "workspace",
+          "projects",
+          "entries"
         ]
       }
     }

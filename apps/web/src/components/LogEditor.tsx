@@ -1,4 +1,5 @@
 import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { ApiError, type PublicMentionCandidate } from '@syncpath/api-client';
 import { apiClient } from '../services/api';
 import type { LogLevel, WorkLog } from '../types';
@@ -15,12 +16,14 @@ interface LogEditorProps {
   onSave: (log: WorkLog) => void | Promise<void>;
   onBack: () => void;
   readOnly?: boolean;
+  /** The card is locked: show it, but never let it be edited or saved. */
+  locked?: boolean;
 }
 
 type Field = 'author' | 'summary' | 'notes';
 type MentionTrigger = { field: Field; start: number; end: number; query: string };
-type MentionOption = { id: string; label: string; detail: string; all?: boolean };
-type SaveError = 'conflict' | 'session' | 'forbidden' | 'missing' | 'network';
+type MentionOption = { id: string; label: string; detail: string; all?: boolean; self?: boolean };
+type SaveError = 'conflict' | 'session' | 'forbidden' | 'missing' | 'network' | 'locked';
 
 const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -42,9 +45,14 @@ const LogEditor: React.FC<LogEditorProps> = ({
   currentUserId,
   onSave,
   onBack,
-  readOnly = false
+  readOnly = false,
+  locked = false
 }) => {
   const { t, locale } = useI18n();
+  // A locked card is read-only even for an editor, and the lock outranks the
+  // caller's own permission — otherwise the Save path would only fail later
+  // with a 409 from the server.
+  const fieldsLocked = readOnly || locked;
   const titleId = useId();
   const overlayRef = useRef<HTMLDivElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -67,6 +75,7 @@ const LogEditor: React.FC<LogEditorProps> = ({
   const [candidatesLoading, setCandidatesLoading] = useState(Boolean(projectId));
   const [candidatesError, setCandidatesError] = useState(false);
   const [trigger, setTrigger] = useState<MentionTrigger | null>(null);
+  const [suggestRect, setSuggestRect] = useState<{ top: number; left: number; width: number; above: boolean } | null>(null);
   const [activeOption, setActiveOption] = useState(0);
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState<{ title: string; message: string } | null>(null);
@@ -124,12 +133,15 @@ const LogEditor: React.FC<LogEditorProps> = ({
     const query = trigger.query.toLocaleLowerCase();
     const allLabel = locale === 'zh' ? '所有人' : 'everyone';
     const all = !query || allLabel.toLocaleLowerCase().includes(query) || 'all'.includes(query)
-      ? [{ id: 'all', label: allLabel, detail: t('Notify everyone on this project'), all: true }]
+      ? [{ id: 'all', label: allLabel, detail: t('Notify everyone on this task'), all: true }]
       : [];
+    // The signed-in user stays in the list: @-ing yourself is a legitimate
+    // "this one is mine" marker. MentionsService.resolve() already drops the
+    // actor from the recipient set, so this never sends you a notification
+    // about your own card.
     const people = labels
-      .filter((candidate) => candidate.id !== currentUserId)
       .filter((candidate) => !query || candidate.label.toLocaleLowerCase().includes(query) || candidate.detail.toLocaleLowerCase().includes(query))
-      .map((candidate) => ({ ...candidate, all: false }));
+      .map((candidate) => ({ ...candidate, all: false, self: candidate.id === currentUserId }));
     return [...all, ...people].slice(0, 9);
   }, [trigger, labels, currentUserId, locale, t]);
 
@@ -159,6 +171,45 @@ const LogEditor: React.FC<LogEditorProps> = ({
     return () => document.removeEventListener('keydown', onKeyDown, true);
   });
 
+  const fieldRefs: Record<Field, React.RefObject<HTMLInputElement | HTMLTextAreaElement>> = {
+    author: authorRef,
+    summary: summaryRef,
+    notes: notesRef
+  };
+
+  // The mention list is portalled to <body> and positioned against the
+  // viewport, because the dialog body scrolls and would otherwise clip an
+  // absolutely-positioned list drawn inside it.
+  const syncSuggestRect = (field: Field): void => {
+    const element = fieldRefs[field].current;
+    if (!element) return;
+    const rect = element.getBoundingClientRect();
+    const MENU_MAX = 256;
+    const spaceBelow = window.innerHeight - rect.bottom;
+    const above = spaceBelow < MENU_MAX && rect.top > spaceBelow;
+    setSuggestRect({
+      top: above ? rect.top - 8 : rect.bottom + 8,
+      left: rect.left,
+      width: rect.width,
+      above
+    });
+  };
+
+  useEffect(() => {
+    if (!trigger) {
+      setSuggestRect(null);
+      return;
+    }
+    const reposition = (): void => syncSuggestRect(trigger.field);
+    reposition();
+    window.addEventListener('resize', reposition);
+    window.addEventListener('scroll', reposition, true);
+    return () => {
+      window.removeEventListener('resize', reposition);
+      window.removeEventListener('scroll', reposition, true);
+    };
+  }, [trigger?.field, options.length]);
+
   const updateTrigger = (field: Field, value: string, caret: number): void => {
     setTrigger(findTrigger(field, value, caret));
     setActiveOption(0);
@@ -170,7 +221,7 @@ const LogEditor: React.FC<LogEditorProps> = ({
   };
 
   const selectOption = (option: MentionOption): void => {
-    if (!trigger || readOnly || savingRef.current) return;
+    if (!trigger || fieldsLocked || savingRef.current) return;
     const field = trigger.field;
     const replacement = `@${option.label} `;
     const nextCaret = trigger.start + replacement.length;
@@ -205,29 +256,46 @@ const LogEditor: React.FC<LogEditorProps> = ({
     window.setTimeout(() => updateTrigger(field, element.value, element.selectionStart ?? element.value.length), 0);
   };
 
-  const renderSuggestions = (field: Field) => trigger?.field === field && !readOnly && !saving && !candidatesLoading && !candidatesError && options.length > 0 ? (
-    <div className="absolute left-0 right-0 top-full z-50 mt-2 max-h-64 overflow-y-auto rounded-2xl border border-white/80 bg-white/95 p-1.5 shadow-2xl shadow-slate-900/15 backdrop-blur-xl" role="listbox" aria-label={t('Mention a teammate')}>
-      {options.map((option, index) => (
-        <button
-          key={option.id}
-          type="button"
-          role="option"
-          aria-selected={index === activeOption}
-          onMouseDown={(event) => { event.preventDefault(); selectOption(option); }}
-          className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors ${index === activeOption ? 'bg-indigo-50 text-indigo-700' : 'text-slate-700 hover:bg-slate-50'}`}
-        >
-          <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-xs font-bold ${option.all ? 'bg-slate-900 text-white' : 'bg-indigo-100 text-indigo-700'}`}>
-            {option.all ? '@' : option.label.charAt(0).toUpperCase()}
-          </span>
-          <span className="min-w-0 flex-1 truncate text-sm font-semibold">{option.all ? t('Everyone') : option.label}</span>
-          {option.detail && <span className="truncate text-xs text-slate-400">{option.detail}</span>}
-        </button>
-      ))}
-    </div>
-  ) : null;
+  const renderSuggestions = (field: Field) => {
+    if (!(trigger?.field === field && !fieldsLocked && !saving && !candidatesLoading && !candidatesError && options.length > 0 && suggestRect)) return null;
+    return createPortal(
+      <div
+        role="listbox"
+        aria-label={t('Mention a teammate')}
+        style={{
+          position: 'fixed',
+          top: suggestRect.above ? undefined : suggestRect.top,
+          bottom: suggestRect.above ? window.innerHeight - suggestRect.top : undefined,
+          left: suggestRect.left,
+          width: suggestRect.width,
+          zIndex: 4000
+        }}
+        className="max-h-64 overflow-y-auto rounded-2xl border border-white/80 bg-white/95 p-1.5 shadow-2xl shadow-slate-900/15 backdrop-blur-xl"
+      >
+        {options.map((option, index) => (
+          <button
+            key={option.id}
+            type="button"
+            role="option"
+            aria-selected={index === activeOption}
+            onMouseDown={(event) => { event.preventDefault(); selectOption(option); }}
+            className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors ${index === activeOption ? 'bg-indigo-50 text-indigo-700' : 'text-slate-700 hover:bg-slate-50'}`}
+          >
+            <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-xs font-bold ${option.all ? 'bg-slate-900 text-white' : 'bg-indigo-100 text-indigo-700'}`}>
+              {option.all ? '@' : option.label.charAt(0).toUpperCase()}
+            </span>
+            <span className="min-w-0 flex-1 truncate text-sm font-semibold">{option.all ? t('Everyone') : option.label}</span>
+            {option.detail && <span className="truncate text-xs text-slate-400">{option.detail}</span>}
+            {option.self && <span className="shrink-0 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-600">{t('You')}</span>}
+          </button>
+        ))}
+      </div>,
+      document.body
+    );
+  };
 
   const handleSave = async (reviewedBaseline?: WorkLog): Promise<void> => {
-    if (readOnly || savingRef.current || composingRef.current) return;
+    if (fieldsLocked || savingRef.current || composingRef.current) return;
     if (saveError === 'missing' || (saveError === 'conflict' && !reviewedBaseline)) return;
     if (!form.author.trim()) {
       setNotice({ title: t('Key objective required'), message: t('Add a short objective before publishing this entry.') });
@@ -235,7 +303,7 @@ const LogEditor: React.FC<LogEditorProps> = ({
     }
     const text = `${form.author}\n${form.summary}\n${form.notes}`;
     if (projectId && text.includes('@') && (candidatesLoading || candidatesError)) {
-      setNotice({ title: t('Team list unavailable'), message: t('Wait for the project members to load before saving a mention.') });
+      setNotice({ title: t('Team list unavailable'), message: t('Wait for the task members to load before saving a mention.') });
       return;
     }
     const mentionAll = hasMention(text, '所有人') || hasMention(text, 'everyone');
@@ -248,7 +316,10 @@ const LogEditor: React.FC<LogEditorProps> = ({
       await onSave(buildCardSave(reviewedBaseline ?? baseline, form, level, { mentionAll, mentionedUserIds }));
     } catch (error) {
       if (error instanceof ApiError) {
-        setSaveError(error.code === 'revision_conflict' || error.status === 409 ? 'conflict' :
+        // entry_locked is its own 409: telling the user "someone edited this"
+        // would send them into the wrong conflict flow.
+        setSaveError(error.code === 'entry_locked' ? 'locked' :
+          error.code === 'revision_conflict' || error.status === 409 ? 'conflict' :
           error.status === 401 ? 'session' : error.status === 403 ? 'forbidden' : error.status === 404 ? 'missing' : 'network');
       } else setSaveError('network');
     } finally {
@@ -262,7 +333,8 @@ const LogEditor: React.FC<LogEditorProps> = ({
     session: t('Your session has expired. Sign in again to save this draft.'),
     forbidden: t('You no longer have permission to edit this card. Your draft is still here.'),
     missing: t('This card is no longer available. Your draft is still here.'),
-    network: t('Your draft is safe. Check your connection and try again.')
+    network: t('Your draft is safe. Check your connection and try again.'),
+    locked: t('This card was locked by a teammate. Your draft is safe.')
   };
 
   const levels: Array<{ value: LogLevel; label: string; hint: string; dot: string }> = [
@@ -307,14 +379,22 @@ const LogEditor: React.FC<LogEditorProps> = ({
         </header>
 
         <div className="space-y-6 overflow-y-auto px-5 py-6 sm:px-8">
+          {locked && <section role="status" className="flex items-start gap-3 rounded-2xl border border-slate-200 bg-slate-100/80 p-4 text-sm text-slate-700">
+            <i className="fas fa-lock mt-0.5 text-xs text-slate-500" />
+            <div>
+              <p className="font-semibold text-slate-900">{t('This card is locked')}</p>
+              <p className="mt-1 leading-6 text-slate-600">{t('Locked cards cannot be moved, edited, or deleted. Unlock it from the timeline to make changes.')}</p>
+            </div>
+          </section>}
           {saveError && <section role="alert" className="rounded-2xl border border-amber-200 bg-amber-50/90 p-4 text-sm text-amber-950">
             <p className="font-semibold">{saveError === 'conflict' ? errorMessages.conflict : t('Could not save this card')}</p>
             <p className="mt-1 leading-6 text-amber-900/80">{saveError === 'conflict' ? t('Review the latest version before replacing it with your draft.') : errorMessages[saveError]}</p>
+            {saveError === 'locked' && <p className="mt-2 text-xs leading-5">{t('A teammate locked this card while you were editing. Close the dialog to see its locked version.')}</p>}
             {saveError === 'conflict' && (latestVersion ? <div className="mt-3 rounded-xl border border-amber-200/75 bg-white/75 p-3">
               <div className="mb-2 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-500"><span className="font-semibold">{t('Latest saved version')}</span><span>{formatDate(latestVersion.weekStartDate)} · {levels.find((option) => option.value === latestVersion.level)?.label}</span></div>
               <div className="max-h-40 space-y-2 overflow-y-auto whitespace-pre-wrap break-words text-slate-700"><p className="font-semibold text-slate-900">{latestVersion.author}</p>{latestVersion.summary && <p><span className="font-semibold">{t('Overview')}: </span>{latestVersion.summary}</p>}{latestVersion.notes && <p><span className="font-semibold">{t('Details')}: </span>{latestVersion.notes}</p>}</div>
-              <button type="button" disabled={readOnly || saving} onClick={() => setReplacementCandidate(captureCardBaseline(latestVersion.weekStartDate, latestVersion))} className="mt-3 rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800 disabled:opacity-50">{t('Replace with my draft')}</button>
-            </div> : <p className="mt-2 text-xs leading-5">{t('The latest version is unavailable. Refresh the project before trying again.')}</p>)}
+              <button type="button" disabled={fieldsLocked || saving} onClick={() => setReplacementCandidate(captureCardBaseline(latestVersion.weekStartDate, latestVersion))} className="mt-3 rounded-lg bg-slate-900 px-3 py-2 text-xs font-semibold text-white hover:bg-slate-800 disabled:opacity-50">{t('Replace with my draft')}</button>
+            </div> : <p className="mt-2 text-xs leading-5">{t('The latest version is unavailable. Refresh the task before trying again.')}</p>)}
           </section>}
           <section>
             <label className="mb-2 block text-xs font-bold text-slate-600" htmlFor={`${titleId}-name`}>{t('Card title')}</label>
@@ -328,7 +408,7 @@ const LogEditor: React.FC<LogEditorProps> = ({
                 onKeyDown={(event) => handleFieldKeyDown(event, 'author')}
                 onCompositionStart={() => { composingRef.current = true; }}
                 onCompositionEnd={(event) => onCompositionEnd('author', event.currentTarget)}
-                readOnly={readOnly || saving}
+                readOnly={fieldsLocked || saving}
                 placeholder={t('e.g. Launch MVP')}
                 className="w-full rounded-2xl border border-slate-200 bg-white/75 px-4 py-3.5 text-base font-semibold text-slate-900 outline-none transition focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100"
               />
@@ -340,7 +420,7 @@ const LogEditor: React.FC<LogEditorProps> = ({
             <p className="mb-2 text-xs font-bold text-slate-600">{t('Timeline level')}</p>
             <div className="grid grid-cols-3 gap-2 rounded-2xl bg-slate-100/85 p-1.5">
               {levels.map((option) => (
-                <button key={option.value} type="button" disabled={readOnly || saving} onClick={() => setLevel(option.value)} className={`rounded-xl px-2 py-2.5 text-left transition-all sm:px-3 ${level === option.value ? 'bg-white shadow-sm ring-1 ring-slate-200/80' : 'hover:bg-white/55'}`} aria-pressed={level === option.value}>
+                <button key={option.value} type="button" disabled={fieldsLocked || saving} onClick={() => setLevel(option.value)} className={`rounded-xl px-2 py-2.5 text-left transition-all sm:px-3 ${level === option.value ? 'bg-white shadow-sm ring-1 ring-slate-200/80' : 'hover:bg-white/55'}`} aria-pressed={level === option.value}>
                   <span className="flex items-center gap-2 text-xs font-bold text-slate-800"><span className={`h-2 w-2 rounded-full ${option.dot}`} />{option.label}</span>
                   <span className="mt-1 block pl-4 text-[11px] text-slate-400">{option.hint}</span>
                 </button>
@@ -362,7 +442,7 @@ const LogEditor: React.FC<LogEditorProps> = ({
                     onKeyDown={(event) => handleFieldKeyDown(event, field)}
                     onCompositionStart={() => { composingRef.current = true; }}
                     onCompositionEnd={(event) => onCompositionEnd(field, event.currentTarget)}
-                    readOnly={readOnly || saving}
+                    readOnly={fieldsLocked || saving}
                     placeholder={field === 'summary' ? t('What needs to happen at this point?') : t('Add context, blockers, or owners…')}
                     className="min-h-[150px] w-full resize-y rounded-2xl border border-slate-200 bg-white/75 px-4 py-3.5 text-sm leading-6 text-slate-800 outline-none transition focus:border-indigo-400 focus:ring-4 focus:ring-indigo-100"
                   />
@@ -376,7 +456,7 @@ const LogEditor: React.FC<LogEditorProps> = ({
         <footer className="flex shrink-0 items-center justify-between gap-4 border-t border-slate-200/80 bg-white/75 px-5 py-4 sm:px-8">
           <p className="text-xs text-slate-500"><span className="font-bold text-indigo-600">@</span> {t('Mention a teammate or everyone')}</p>
           <div className="flex items-center gap-2">
-            {!readOnly && <button type="button" onClick={() => void handleSave()} disabled={saving || saveError === 'conflict' || saveError === 'missing'} className="rounded-xl bg-indigo-600 px-5 py-2.5 text-xs font-bold text-white shadow-lg shadow-indigo-200 transition-colors hover:bg-indigo-700 disabled:opacity-60">{saving ? t('Saving…') : t('Save card')}</button>}
+            {!fieldsLocked && <button type="button" onClick={() => void handleSave()} disabled={saving || saveError === 'conflict' || saveError === 'missing'} className="rounded-xl bg-indigo-600 px-5 py-2.5 text-xs font-bold text-white shadow-lg shadow-indigo-200 transition-colors hover:bg-indigo-700 disabled:opacity-60">{saving ? t('Saving…') : t('Save card')}</button>}
           </div>
         </footer>
       </div>

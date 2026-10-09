@@ -1,234 +1,172 @@
 # SyncPath
 
-面向 AI 产品经理和团队的时间线计划工具：把大目标拆成里程碑、阶段节点和执行事项，在同一张时间线上安排、调整与协作。
+SyncPath 是团队共用的项目与任务计划工具，提供卡片时间轴、成员协作、在线状态和注册后只读分享。
 
-项目正在从可运行工具打磨为正式产品，当前交付形态为 **Web 应用 + 独立 API + PostgreSQL**。桌面安装包和 App Store 上架尚未完成验收。
+界面层级为 **项目 → 任务 → 卡片**：可以创建多个项目，每个项目包含多个任务，每个任务有自己的时间轴、卡片和协作成员。首页选择项目并管理任务，任务页显示所属项目并支持返回任务列表。
 
-[GitHub 仓库](https://github.com/yaopengcheng11/SyncPath) · [产品打磨路线图](docs/PRODUCT_POLISHING_ROADMAP.md) · [局域网使用说明](docs/LAN_MODE.md)
+原「工作区」在界面中改称「项目」，原「项目」改称「任务」。现有数据和接口保持兼容：数据库与 API 中的 `workspace` 对应界面项目，`project` 对应界面任务。
 
-## 当前可以做什么
+## 使用方式
 
-- 创建工作区，集中管理团队成员与项目；重命名、归档工作区。
-- 为项目设置负责人、编辑者和查看者，按权限协作。
-- 创建不限于三张卡片的计划：**里程碑 / 阶段节点 / 执行事项**是三个展示层级，每层可放多张卡片。
-- 在时间线上拖动卡片，或选中后用左右方向键调整日期，修改会保存到服务端。
-- 双击卡片打开居中的毛玻璃编辑弹窗；保存冲突时保留草稿，对照最新内容后明确确认覆盖。
-- 输入 `@` 选择项目成员或 `@所有人`，保存后生成站内通知，通过铃铛查看。
-- 在中文与英文界面之间切换，工作区、项目名称与卡片内容支持中文输入。
-- 在公司局域网共用一个服务，同步项目变化、在线状态及编辑目标；同一账号的其他窗口也能收到变化。
+- **项目与任务**：首页创建、选择项目，在当前项目中创建任务；任务可配置成员、可见范围和计划设置。
+- **卡片时间轴**：按日期组织卡片，支持查看详情、编辑、移动、复制粘贴、折叠和锁定。锁定卡片需要先解锁才能修改、移动或删除，写入由服务端检查权限与版本。
+- **多人协作**：任务中的卡片与成员变更通过 SSE 同步。卡片写入使用 `revision` 版本检查；版本冲突返回 `409`，避免直接覆盖已变化的内容。
+- **在线成员**：任务顶部的「N 人在线」显示正在打开此任务的成员，以及查看或编辑卡片的状态；成员面板也显示当前任务中的在线状态。同一账号的多个标签页只计一人。
+- **提及通知**：卡片中提及成员会生成通知，登录后可在通知中心查看；提及自己不生成通知。
+- **中英文界面**：可以在界面中切换语言。
 
-时间线目前按**自然日**安排，适合人工倒排和调整计划。自动按工作日倒排、任务依赖和工期联动仍在规划中。国家节假日选择与标记已移除；新项目默认不启用国家日历，旧数据中的日历字段保留兼容。
+### 成员与权限
 
-## 工作区与权限
-
-工作区是团队与项目的容器。创建者自动成为 Owner；项目创建者自动成为 Lead。成员设置入口位于工作区和项目的管理面板，邀请的用户需要先注册账号。
-
-| 范围 | 角色 | 主要能力 |
+| 范围 | 角色 | 作用 |
 | --- | --- | --- |
-| 工作区 | Owner（所有者） | 管理工作区、成员及项目；可归档工作区 |
-| 工作区 | Admin（管理员） | 管理工作区和成员；管理项目；不能归档工作区 |
-| 工作区 | Member（成员） | 参与工作区，创建项目；具体项目操作受项目权限约束 |
-| 项目 | Lead（负责人） | 管理项目和成员，编辑及删除项目、卡片 |
-| 项目 | Editor（编辑者） | 编辑项目和卡片，不能管理项目成员或删除项目 |
-| 项目 | Viewer（查看者） | 查看项目与卡片，不能修改 |
+| 项目 | Owner / Admin / Member | 项目成员与设置管理；Owner / Admin 可管理项目分享 |
+| 任务 | Lead / Editor / Viewer | Lead 管理任务和任务成员；Editor 编辑卡片；Viewer 只读 |
+| 分享入口 | 注册或登录后的接收者 | 在独立分享页面查看指定内容，不授予项目或任务成员身份 |
 
-工作区 Owner/Admin 拥有相应项目管理权限。后端每次请求校验身份、工作区及项目权限；界面隐藏按钮不能替代后端鉴权。工作区和项目的删除入口采用归档或软删除，归档恢复界面尚未提供。
+项目所有者、管理员可管理所属任务。普通项目成员能否在任务列表中看到任务，由任务的可见范围决定；查看卡片和参与实时协作仍需要加入该任务的成员名单。项目成员身份不等于所有任务的读取或编辑权限。
 
-## 技术栈
+### 只读分享
 
-| 部分 | 实现 |
-| --- | --- |
-| 仓库 | npm workspaces + TypeScript |
-| 前端 | React 18、Vite 5、Tailwind CSS 3 |
-| 后端 | NestJS 10、Fastify、Prisma 5、PostgreSQL 16 |
-| 协作 | SSE 事件流、对象级写入、版本号冲突检查 |
-| 身份 | HttpOnly 会话 Cookie、bcrypt 密码哈希 |
-| 图标 | 本地打包的 Font Awesome 6.7.2，主界面不依赖图标 CDN |
+1. 项目所有者或管理员在首页点击「分享项目」；任务负责人 Lead 或所属项目所有者、管理员在任务页点击「分享任务」。
+2. 点击生成链接并复制，交给接收者。新接收者先注册，已有账号可以直接登录；未登录时不展示分享内容。
+3. 接收者进入只读页面，可查看时间轴和卡片详情，无法新增、编辑、移动、删除或管理成员。已有编辑权限的账号在分享页面也使用只读视图，其正常成员权限不变。
+4. 分享者可在分享弹窗中停用链接。已打开的分享页面会定期复核访问权限，发现失效后隐藏内容。
 
-## 首次运行
+**分享整个项目会包含其中所有未归档任务及卡片，包括仅任务成员可见的任务。分享任务只包含当前任务。** 项目分享会随着任务和卡片变化展示当前内容，并非静态快照。
 
-准备 Node.js 18.18 或更新版本、支持 workspaces 的 npm，以及可连接的本地 PostgreSQL 16。本次验证环境为 Node.js 22.22.3、npm 10.9.8。以下命令均从仓库根目录执行。
+接收者不会因链接获得成员身份，也不能通过链接调用普通编辑或转分享接口。链接停用、目标归档或删除、分享者账号停用或失去分享权限，都会使相应访问失效。页面按约 3 秒间隔串行重新读取；请求失败时隐藏内容，网络恢复后可重试。隐藏页面不等于撤回接收者之前已看到或自行保存的信息。
+
+链接令牌仅在生成时显示，关闭弹窗后无法从历史列表恢复原文；需要再次复制时应保存刚生成的链接，或生成新链接。局域网 HTTP 下浏览器可能不允许自动复制，弹窗会选中链接供手动复制。
+
+## 启动开发环境
+
+需要 Node.js **18.18 或更高**、npm 和可连接的 PostgreSQL。以下命令从仓库根目录执行。
+
+### 配置数据库
+
+新环境尚未创建 `apps/api/.env` 时，从模板复制并按实际环境填写：
 
 ```bash
-git clone https://github.com/yaopengcheng11/SyncPath.git
-cd SyncPath
 cp apps/api/.env.example apps/api/.env
 ```
 
-**先创建并填写 `.env`，再安装依赖**：安装后的自动步骤会构建领域包并生成 Prisma Client。
+已有环境保留原 `.env`。检查 `DATABASE_URL` 指向的数据库、账号及端口；模板中的开发值只是示例。会话密钥 `SESSION_SECRET` 应使用独立随机值，不能在正式环境沿用模板默认值。
 
-使用你熟悉的数据库管理方式创建本地开发角色和数据库。下面是可在 PostgreSQL 管理连接中执行的示例；把 `CHANGE_ME` 换成自己的本地密码，已有数据库可直接使用。
-
-```sql
-CREATE ROLE syncpath WITH LOGIN CREATEDB PASSWORD 'CHANGE_ME';
-CREATE DATABASE syncpath_dev OWNER syncpath;
-```
-
-将 `apps/api/.env` 中的连接改为对应值，例如：
-
-```dotenv
-DATABASE_URL="postgresql://syncpath:CHANGE_ME@127.0.0.1:5432/syncpath_dev?schema=public"
-```
-
-`.env.example` 的密码和 `SESSION_SECRET` 只用于说明配置格式；应替换为自己的值。可生成随机会话密钥，再填入 `.env`：
+安装依赖并明确执行迁移：
 
 ```bash
-node -e "console.log(require('node:crypto').randomBytes(32).toString('base64'))"
 npm ci
-npm run db:migrate:deploy -w @syncpath/api
-npm run dev
+npm run db:migrate:deploy -w apps/api
 ```
 
-打开 <http://localhost:5183/> 注册并登录。新安装无需预建固定名称的测试数据库，也无需先运行演示数据脚本。
+`npm ci` 会构建共享领域包并生成本机 Prisma 客户端。`npm run dev` 和日常启动脚本**不会自动执行数据库迁移**；更新代码后需要先执行上面的迁移命令。
 
-如需本地演示账号，可额外执行 `npm run db:seed -w @syncpath/api`。首次创建的账号为 `demo`，密码为 `demo-pass-1234`。该脚本会删除并重建 `demo-workspace`，仅用于可重置的本地演示数据库；已有同邮箱用户不会被重设密码。
-
-## 本地开发与局域网
-
-`npm run dev` 同时启动前后端，也可以在两个终端分别启动：
+### 本机试用
 
 ```bash
-npm run dev:api
-npm run dev:web
+VITE_HOST=127.0.0.1 VITE_PORT=5183 VITE_STRICT_PORT=true \
+VITE_API_TARGET=http://127.0.0.1:3160 \
+API_HOST=127.0.0.1 API_PORT=3160 \
+COOKIE_SECURE=false COOKIE_SAMESITE=lax npm run dev
 ```
 
-默认 Web 端口为 `5183`、API 为 `3160`。浏览器通过 Web 服务的 `/api` 代理访问后端，登录 Cookie 由浏览器自动携带。
+打开 [http://127.0.0.1:5183/](http://127.0.0.1:5183/)，首次使用可注册账号。按 `Ctrl+C` 停止本次网页与 API 服务。
 
-公司局域网中，由一台主机运行：
+### 给局域网同事使用
+
+将下面的 `192.168.1.20` 换成运行服务电脑的实际局域网地址：
 
 ```bash
-npm run dev:lan
+VITE_HOST=0.0.0.0 VITE_PORT=5183 VITE_STRICT_PORT=true \
+VITE_API_TARGET=http://127.0.0.1:3160 \
+VITE_SHARE_BASE_URL=http://192.168.1.20:5183/ \
+API_HOST=127.0.0.1 API_PORT=3160 \
+COOKIE_SECURE=false COOKIE_SAMESITE=lax npm run dev
 ```
 
-同事访问终端显示的 `http://<主机内网 IP>:5183/`，分别注册或登录账号，再加入工作区及项目。局域网脚本绑定网络接口，并使用固定端口；如果端口被占用，可一起改 Web 和 API：
+同事访问 `http://192.168.1.20:5183/` 或生成的分享链接。网页服务接受局域网连接，通过 `/api` 同源代理连接本机 API；这个示例只向局域网开放网页端口。
+
+`VITE_SHARE_BASE_URL` 使从本机地址打开的分享弹窗也生成同事可访问的链接。未设置时使用当前网页地址；若页面地址是 `localhost` 或 `127.0.0.1`，生成的链接只能指向接收者自己的电脑。地址或端口变化后，分享入口的基础地址也需要相应调整。
+
+运行服务的电脑与 PostgreSQL 需要保持工作。同事无法连接时，检查是否处于可互通的网络，以及 macOS 防火墙是否允许网页服务端口的传入连接。开发服务器适合内部试用；正式部署应构建前端、部署 API，并配置 HTTPS 与反向代理。使用 HTTPS 时应设置 `COOKIE_SECURE=true`，并核对实际站点来源、代理和 Cookie 配置。
+
+### macOS 新环境初始化脚本
+
+`setup-mac.sh` 可选用于新 Mac 的本地初始化：检测架构、定位或通过 Homebrew 安装 PostgreSQL 16，在 `.postgres/data/` 初始化集群，默认使用 `5433`，安装依赖并执行迁移。已有 `apps/api/.env` 会保留。
 
 ```bash
-VITE_PORT=5200 API_PORT=3200 npm run dev:lan
+chmod +x setup-mac.sh start-team-server.sh stop-team-server.sh
+./setup-mac.sh --no-restore
+VITE_SHARE_BASE_URL=http://192.168.1.20:5183/ ./start-team-server.sh
 ```
 
-本机开发若更换 API 端口，也要让 Web 代理指向新地址：
+`start-team-server.sh` 默认启动脚本管理的 `5433` PostgreSQL，并让网页和 API 均监听 `0.0.0.0`；`LOCAL_ONLY=1` 可限制为本机，`VITE_PORT=5184` 可更改网页端口。日常停止优先在启动终端按 `Ctrl+C`。
+
+压缩包带入的 Windows 脚本仍使用固定的工具路径，尚未完成 Windows 实机验证；其中 `stop-team-server.ps1` 会结束同一 Node 安装下的其他 Node 进程。Windows 使用前应按实际环境调整脚本，停止服务优先使用启动终端的 `Ctrl+C`。
+
+GitHub 仓库不包含用户数据库快照。省略 `--no-restore` 时，初始化脚本仅在本地存在 `syncpath_dev.dump`，且检查目标数据库的工作区表没有记录时尝试恢复。恢复与创建新环境是独立的数据操作，不应作为现有数据库升级方式。
+
+**已有环境以 `.env` 为准。** 例如 `.env` 指向 `5432` 的数据库时，启动脚本另外检查的 `5433` 并不是应用实际使用的数据库。此时优先按前面的显式启动方式运行，避免把脚本生成的 `.postgres/` 误当作已有数据位置。
+
+## 数据与代码升级
+
+账号、会话、项目、任务、卡片、成员关系、提及记录及分享链接存储在 `DATABASE_URL` 指向的 PostgreSQL 中。数据库可以位于本机、脚本创建的 `.postgres/`，也可以位于其他服务器；数据位置不由代码目录决定。
+
+| 内容 | 位置与边界 |
+| --- | --- |
+| 持久业务数据 | 实际配置的 PostgreSQL 数据库 |
+| 数据库连接与会话配置 | `apps/api/.env`，不提交到 Git |
+| 任务在线状态与实时事件 | 当前 API 进程内存，重启后清空 |
+| 分享令牌 | 数据库仅存 SHA-256 摘要；原文通过分享链接交付 |
+| 数据库备份 | 用户自行生成并验证的备份文件，不随代码自动产生或上传 |
+
+升级已有环境时：
+
+1. 先确认 `.env` 指向的实际数据库，使用 `pg_dump` 生成备份并验证可以读取；保留 `.env` 及数据库数据目录。不要用压缩包中的另一份快照覆盖当前数据库。
+2. 更新代码，阅读新增 `apps/api/prisma/migrations/` 与相关发布说明。
+3. 执行 `npm ci`，然后执行 `npm run db:migrate:deploy -w apps/api`。
+4. 重新启动服务，检查数据库连接、登录和任务读取。
+
+`migrate deploy` 只执行尚未应用的迁移，但迁移 SQL 可以修改结构和数据；应先检查迁移内容并备份。`db:reset` 会重置数据库，只适用于明确可以丢弃的环境。复制正在运行的 PostgreSQL 数据目录不能替代经过验证的数据库备份。
+
+在线状态以当前任务为范围，每 20 秒保活，最后一次保活后约 45–50 秒移除失联状态；离开任务会主动退出。自身连接异常时显示「重新连接」或「状态暂不可用」。当前 SSE 与在线状态依赖单个 API 进程，多实例部署需要共享事件与在线状态通道。
+
+## 开发与验证
+
+这是一个 npm workspaces 单仓库。
+
+| 路径 | 职责 |
+| --- | --- |
+| `apps/web/` | React + TypeScript + Vite 网页界面 |
+| `apps/api/` | NestJS + Fastify API、Prisma 模型与迁移 |
+| `packages/domain/` | 共享领域类型、ID 与领域逻辑 |
+| `packages/api-client/` | 类型化 API 客户端与生成类型 |
+| `packages/contracts/` | OpenAPI 契约快照 |
+| `docs/` | 设计、验证与代码审查文档 |
+
+前端开发服务支持热更新，API 开发服务使用 Nest watch。接口变化后，先从编译后的 API 导出契约，再重新生成客户端类型：
 
 ```bash
-API_PORT=3200 VITE_PORT=5200 VITE_API_TARGET=http://127.0.0.1:3200 npm run dev
+npm run openapi:dump -w apps/api
+npm run generate -w packages/api-client
 ```
 
-当前 SSE 协作服务运行在单个 API 实例中，断线重连后重新获取项目数据。多实例部署需要共享事件通道。更多网络、防火墙和 HTTPS 配置见 [LAN_MODE.md](docs/LAN_MODE.md)。
-
-## 检查与测试
+常规检查：
 
 ```bash
 npm run typecheck
-npm test
-```
-
-也可以分别运行：
-
-```bash
-npm run test -w @syncpath/web
-npm run test -w @syncpath/api
-npm run test:safety -w @syncpath/api
-```
-
-API 测试入口会创建唯一命名的临时 PostgreSQL 数据库、执行迁移、启动独立随机端口 API，核对运行 token 后才加载测试文件。正常退出或处理中断时，停止本轮进程并删除本轮自建数据库。直接运行 Vitest 指向开发库或日常 API 会被拒绝。
-
-测试需要本地数据库角色拥有 `CREATEDB`。如开发角色没有此权限，可为本轮指定独立的本地管理连接：
-
-```bash
-INTEGRATION_ADMIN_DATABASE_URL='postgresql://test_admin:CHANGE_ME@127.0.0.1:5432/postgres' npm run test -w @syncpath/api
-```
-
-前端回归覆盖卡片移动、冻结编辑版本和清空已保存字段；后端覆盖身份、租户隔离、成员撤权、导入、并发版本冲突、提及通知、协作事件以及旧日历字段兼容。测试通过不代表桌面安装、生产部署或 App Store 审核已通过。
-
-最近一次本地验证：**2026-10-09**。
-
-| 检查 | 结果 |
-| --- | --- |
-| 全部 workspace 类型检查 | 通过 |
-| API 隔离测试 | 50/50，通过 9 个测试文件；临时环境完成清理 |
-| 前端回归测试 | 12/12，通过 3 个测试文件 |
-| 测试目标安全检查 | 5/5，通过 |
-| 干净副本安装 | 按锁文件安装通过，自动构建领域包并生成 Prisma Client |
-| 干净副本生产构建 | Web、API 和领域包全部通过 |
-| 接口类型一致性 | 重新生成的客户端类型与提交文件一致 |
-
-## 构建与部署边界
-
-```bash
+npm run test
 npm run build
 ```
 
-该命令依次构建领域包、Web 和 API。Web 产物位于 `apps/web/dist`，API 产物位于 `apps/api/dist`。
+API 默认测试入口先执行安全检查，再创建一次性本机 PostgreSQL 数据库与独立 API 端口，应用迁移并执行集成测试，结束后清理。需要本地 PostgreSQL 可用，连接账号有创建、删除测试数据库的权限；不应直接将集成测试配置指向业务数据库或在线服务。
 
-`npm run preview -w @syncpath/web` 和 `npm run preview:lan` 只提供 Web 静态预览，不会自动启动 API，也不能替代完整生产部署。
-
-旧 `deploy.sh` 已停用，会提示静态部署流程过时并退出；它不能部署当前产品。当前部署必须同时考虑 Web、API 和数据库。
-
-正式部署还需配置 PostgreSQL、运行 API、为 Web 配置同源 `/api` 反向代理、HTTPS、独立会话密钥及安全 Cookie。开发库与生产库应分开，演示账号和开发密钥不应带入正式环境。数据库备份、恢复演练、运行监控和上线流程尚需完成。
-
-## API 与客户端类型
-
-开发 API 提供以下入口：
-
-- `http://localhost:3160/health`：服务与数据库健康状态。
-- `http://localhost:3160/api/docs`：Swagger 接口文档。
-- `http://localhost:3160/api/docs-json`：OpenAPI JSON，当前快照版本为 3.0.0。
-
-接口以 `/api/v1` 为前缀，包含账号、工作区、项目、卡片、成员、协作、提及通知及旧数据导入。鉴权使用会话 Cookie；错误返回统一的 `statusCode / code / message` 等字段。
-
-修改接口契约后，显式更新快照及客户端类型：
+卡片锁定判断的单元测试目前未纳入默认 `npm test`，可从仓库根目录额外执行：
 
 ```bash
-npm run openapi:dump -w @syncpath/api
-npm run generate -w @syncpath/api-client
+node --import tsx --test apps/api/scripts/entry-lock.test.ts
 ```
 
-`openapi:dump` 会先构建 API，再独立生成快照，无需占用 API 监听端口。日常 API 启动也会更新快照；隔离测试 API 不会写回契约文件。
+2026-10-09 的本地验收：隔离 API 集成测试 **78/78**、集成目标安全检查 **5/5**、Web 测试 **39/39**，类型检查与完整构建通过。一次性账号的浏览器流程覆盖项目与任务创建、在线成员、分享链接生成、接收者注册和已有账号登录、只读详情、项目分享范围与停用后隐藏。局域网地址已在服务电脑上访问检查，同事电脑的实际连接尚未验收；Windows 与 Electron 打包未实测。
 
-## 目录结构
-
-```text
-apps/
-  web/
-    src/AppV2.tsx              当前应用入口
-    src/components/            时间线、卡片弹窗、成员管理与通知
-    src/hooks/                 API 数据及协作状态
-    src/i18n.tsx               中文与英文界面
-    electron/                  尚未验收的桌面原型
-  api/
-    src/main.ts                API 启动入口
-    src/common/                数据库、会话、鉴权与错误处理
-    src/modules/               identity / workspaces / projects / entries
-                               workspace-members / project-members
-                               collaboration / mentions / imports / health
-    prisma/                    数据模型、迁移与演示数据
-    scripts/                   OpenAPI 导出及隔离测试入口
-    test/                      后端回归测试
-packages/
-  domain/                      领域角色、权限与 ID
-  api-client/                  请求客户端及生成的接口类型
-  contracts/                   OpenAPI 快照
-  config/                      共享 TypeScript 配置
-docs/                          产品、品牌、架构和验收文档
-```
-
-`apps/web/src/App.tsx` 及旧 Yjs 协作实现保留用于历史参考，当前 `index.tsx` 加载的是 `AppV2`。Electron 相关脚本仍属原型，尚不能作为可交付桌面产品使用。
-
-## 后续打磨方向
-
-1. **计划能力**：阶段层级、折叠与筛选、依赖关系、工期和自动倒排。
-2. **团队流程**：评论讨论、修改历史、归档恢复、权限体验和通知完善。
-3. **可靠性**：数据库第二层隔离（RLS）、备份恢复、生产监控与多实例协作。
-4. **AI 辅助**：计划草拟、风险提醒和总结；当前 AI 服务仍为占位实现，不能当作已上线功能。
-5. **桌面与上架**：修复桌面打包，完善安装、更新、隐私说明及目标平台验收，再推进 App Store。
-
-## 项目文档
-
-- [当前产品打磨路线图](docs/PRODUCT_POLISHING_ROADMAP.md)
-- [AI 产品团队平台规划](docs/AI_PRODUCT_TEAM_PLATFORM_PLAN.md)
-- [开发框架与验收标准](docs/SYNCPATH_DEVELOPMENT_FRAMEWORK_ACCEPTANCE.md)
-- [品牌与界面样式](docs/SYNCPATH_BRAND_STYLE.md)
-- [目标架构图](docs/SYNCPATH_TARGET_ARCHITECTURE.html)
-- [局域网与协作](docs/LAN_MODE.md)
-- [R0 历史记录](docs/R0_NOTES.md) · [G1 独立审查](docs/G1_INDEPENDENT_REVIEW.md)
-
-规划和历史审查文档记录的是阶段目标或当时状态；当前运行方式以本 README 和仓库脚本为准。
+导入代码的撤销、跨账号剪贴板和维护脚本仍有待修复问题；范围、复现与验收边界见 [2026-10-09 代码审查报告](docs/CODE_REVIEW_2026-10-09.md)。

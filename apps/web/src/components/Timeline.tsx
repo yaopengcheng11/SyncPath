@@ -5,6 +5,8 @@ import html2canvas from 'html2canvas';
 import AppDialog from './AppDialog';
 import { useI18n } from '../i18n';
 import { planTimelineMoves, timelineContentSize, timelineDateAtPosition, timelineDatePosition, timelineDragDays, timelineFitScale } from './timelineGeometry';
+import { cardClipboard, type ClipboardCard } from '../utils/cardClipboard';
+import { planCollapseToggle, pruneCollapsedIds } from './cardCollapse';
 
 interface TimelineProps {
   logs: Record<string, WorkLog[]>;
@@ -15,7 +17,9 @@ interface TimelineProps {
   onUpdateProject?: (updates: Partial<Project>) => void;
   onDeleteLogs?: (logIds: string[]) => void;
   onToggleLock?: (logId: string, dateStr: string) => void;
-  onPasteLogs?: (logs: WorkLog[], targetDate: string | null) => void;
+  onPasteLogs?: (logs: ClipboardCard[], targetDate: string | null) => void;
+  /** Undo the last card operation. Returns a description, or null if nothing to undo. */
+  onUndo?: () => string | null;
   readOnly?: boolean;
   suspended?: boolean;
   autoScale?: boolean;
@@ -46,9 +50,10 @@ const Timeline: React.FC<TimelineProps> = ({
   onMoveLogs, 
   onCopyLogs,
   onUpdateProject, 
-  onDeleteLogs, 
-  onToggleLock, 
+  onDeleteLogs,
+  onToggleLock,
   onPasteLogs,
+  onUndo,
   readOnly = false,
   suspended = false,
   autoScale = false,
@@ -61,6 +66,10 @@ const Timeline: React.FC<TimelineProps> = ({
   const [selectedPercentage, setSelectedPercentage] = useState<number | null>(null);
   
   const [selectedLogIds, setSelectedLogIds] = useState<Set<string>>(new Set<string>());
+  // Pure view state: which cards are folded to a compact avatar. Not persisted
+  // server-side on purpose — collapsing is a "my screen is cluttered" concern,
+  // and a teammate's view must not change because of it.
+  const [collapsedLogIds, setCollapsedLogIds] = useState<Set<string>>(new Set<string>());
   const [hoveredLogId, setHoveredLogId] = useState<string | null>(null);
   const [selectionBox, setSelectionBox] = useState<SelectionBox | null>(null);
 
@@ -74,7 +83,6 @@ const Timeline: React.FC<TimelineProps> = ({
   const [isExporting, setIsExporting] = useState(false);
   const [exportBg, setExportBg] = useState<'white' | 'transparent'>('white');
   const [exportError, setExportError] = useState<string | null>(null);
-  const [pendingDeleteIds, setPendingDeleteIds] = useState<string[]>([]);
 
   const [transform, setTransform] = useState({ x: 0, y: 0, scale: 1 });
   const [timelineScale, setTimelineScale] = useState(1); // New state for horizontal stretching
@@ -119,12 +127,12 @@ const Timeline: React.FC<TimelineProps> = ({
 
   // Handle Selection Presence Broadcast
   useEffect(() => {
-    if (readOnly || !onInteraction) return;
+    if (readOnly || !onInteraction || draggingLog) return;
     
     if (selectedLogIds.size > 0) {
-       // Broadcast the first selected ID as being "Edited"
+       // Selection is viewing; actual edits and moves publish Editing.
        const ids = Array.from(selectedLogIds);
-       onInteraction('Editing', ids[0]);
+       onInteraction('Viewing', ids[0]);
     } else if (!draggingLog) {
        // If nothing selected and not dragging, revert to Viewing
        onInteraction('Viewing', null);
@@ -144,6 +152,16 @@ const Timeline: React.FC<TimelineProps> = ({
           }, 2000);
       }
   };
+
+  // Mixed selections fold to collapsed (the useful direction when the board is
+  // cluttered); a selection that is already fully collapsed expands. See
+  // planCollapseToggle for the exact rule.
+  const toggleCollapsedLogs = useCallback((ids: string[]): boolean => {
+    if (ids.length === 0) return false;
+    const plan = planCollapseToggle(collapsedLogIds, ids);
+    setCollapsedLogIds(plan.next);
+    return plan.willCollapse;
+  }, [collapsedLogIds]);
 
   const copyToClipboardFallback = (text: string) => {
     const textArea = document.createElement("textarea");
@@ -202,6 +220,14 @@ const Timeline: React.FC<TimelineProps> = ({
     });
   }, [logMarkers]);
 
+  // Drop collapse flags for cards that no longer exist (deleted, or outside the
+  // project range). Unlike the selection prune above this reads every log, not
+  // just the visible ones: hiding a level must not silently expand its cards.
+  useEffect(() => {
+    const liveIds = new Set<string>((Object.values(logs) as WorkLog[][]).flat().map(log => log.id));
+    setCollapsedLogIds(previous => pruneCollapsedIds(previous, liveIds));
+  }, [logs]);
+
   const fitToView = useCallback(() => {
     if (!captureRef.current) return;
     setTimelineScale(1); // Reset stretch
@@ -243,7 +269,7 @@ const Timeline: React.FC<TimelineProps> = ({
 
   useEffect(() => {
     const handleKeyDown = async (e: KeyboardEvent) => {
-      if (suspended || showProjectSettings || showExportModal || exportError || pendingDeleteIds.length > 0) return;
+      if (suspended || showProjectSettings || showExportModal || exportError) return;
       if (!containerRef.current?.contains(document.activeElement)) return;
       const activeTag = document.activeElement?.tagName;
       if (activeTag === 'INPUT' || activeTag === 'TEXTAREA' || activeTag === 'SELECT' || activeTag === 'BUTTON' || (document.activeElement as HTMLElement)?.isContentEditable) return;
@@ -254,6 +280,20 @@ const Timeline: React.FC<TimelineProps> = ({
       // Zoom Shortcuts
       if (e.key === '=' || e.key === '+') { handleZoomIn(); e.preventDefault(); }
       if (e.key === '-') { handleZoomOut(); e.preventDefault(); }
+
+      // Collapse / expand shortcut. Available to viewers too — folding is a
+      // local view concern, so a read-only member should get the same tidier
+      // board. Guarded against Ctrl/Alt/Shift so browser and IME shortcuts
+      // (Ctrl+E, Alt+E, Shift+E …) keep working.
+      if (!e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && e.key.toLowerCase() === 'e') {
+        if (selectedLogIds.size > 0) {
+          e.preventDefault();
+          const ids = Array.from(selectedLogIds);
+          const willCollapse = toggleCollapsedLogs(ids);
+          showToast(willCollapse ? t('Collapsed {{count}} items', { count: ids.length }) : t('Expanded {{count}} items', { count: ids.length }));
+        }
+        return;
+      }
 
       if (e.key === 'Escape') { 
         setSelectedDate(null); setSelectedPercentage(null); setShowLevelMenu(false); 
@@ -277,8 +317,11 @@ const Timeline: React.FC<TimelineProps> = ({
                 }
             });
 
+            // No confirmation step: the delete is recorded on the undo stack,
+            // so Ctrl+Z brings the cards back.
             if (idsToDelete.length > 0) {
-                setPendingDeleteIds(idsToDelete);
+                onDeleteLogs(idsToDelete);
+                setSelectedLogIds(new Set<string>());
             }
         }
       }
@@ -294,25 +337,44 @@ const Timeline: React.FC<TimelineProps> = ({
       
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c') {
         if (selectedLogIds.size === 0) return;
-        const logsToCopy: WorkLog[] = [];
-        const ids = Array.from(selectedLogIds);
+        const logsToCopy: ClipboardCard[] = [];
+        const ids = new Set(selectedLogIds);
         for (const list of (Object.values(logs) as WorkLog[][])) {
             for (const log of list) {
-                if (ids.includes(log.id)) { logsToCopy.push(log); }
+                if (!ids.has(log.id)) continue;
+                logsToCopy.push({
+                    title: log.author,
+                    level: log.level,
+                    weekStartDate: log.weekStartDate,
+                    summary: log.summary || undefined,
+                    notes: log.notes || undefined,
+                    status: log.status,
+                    mentionAll: log.mentionAll,
+                    mentionedUserIds: log.mentionedUserIds
+                });
             }
         }
         if (logsToCopy.length > 0) {
             e.preventDefault();
-            const clipboardData = { syncPathType: 'logs', data: logsToCopy };
-            const jsonStr = JSON.stringify(clipboardData);
-            try {
-                await navigator.clipboard.writeText(jsonStr);
-                showToast(t('Copied {{count}} items', { count: logsToCopy.length }));
-            } catch (err) {
-                if (copyToClipboardFallback(jsonStr)) showToast(t('Copied {{count}} items', { count: logsToCopy.length }));
-                else showToast(t('Copy failed'));
-            }
+            const count = cardClipboard.write(logsToCopy);
+            showToast(t('Copied {{count}} items', { count }));
         }
+      }
+
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') {
+        const clipboardCards = cardClipboard.read();
+        if (onPasteLogs && clipboardCards.length > 0) {
+          e.preventDefault();
+          onPasteLogs(clipboardCards, selectedDate || null);
+          showToast(t('Pasted {{count}} items', { count: clipboardCards.length }));
+          return;
+        }
+      }
+
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) {
+        if (!onUndo) return;
+        e.preventDefault();
+        showToast(onUndo() ?? t('Nothing to undo'));
       }
 
       if (selectedLogIds.size > 0 && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
@@ -327,27 +389,15 @@ const Timeline: React.FC<TimelineProps> = ({
     window.addEventListener('keyup', handleKeyUp);
     window.addEventListener('blur', handleBlur);
     return () => { window.removeEventListener('keydown', handleKeyDown); window.removeEventListener('keyup', handleKeyUp); window.removeEventListener('blur', handleBlur); };
-  }, [logs, logMarkers, onDeleteLogs, lockedLevels, selectedLogIds, readOnly, suspended, showProjectSettings, showExportModal, exportError, pendingDeleteIds, fitToView, handleZoomIn, handleZoomOut, moveSelectedLogsByDays, t]);
+  }, [logs, logMarkers, onDeleteLogs, lockedLevels, selectedLogIds, readOnly, suspended, showProjectSettings, showExportModal, exportError, fitToView, handleZoomIn, handleZoomOut, moveSelectedLogsByDays, onPasteLogs, onUndo, selectedDate, toggleCollapsedLogs, t]);
 
   useEffect(() => {
-    const handlePaste = (e: ClipboardEvent) => {
-        if (readOnly || suspended || !onPasteLogs || !containerRef.current?.contains(document.activeElement)) return;
-        const activeTag = document.activeElement?.tagName;
-        if (activeTag === 'INPUT' || activeTag === 'TEXTAREA') return;
-        const text = e.clipboardData?.getData('text/plain');
-        if (!text) return;
-        try {
-            const json = JSON.parse(text);
-            if (json.syncPathType === 'logs' && Array.isArray(json.data)) {
-                e.preventDefault();
-                onPasteLogs(json.data, selectedDate || null);
-                showToast(`Pasted ${json.data.length} items`);
-            }
-        } catch (err) {}
-    };
-    window.addEventListener('paste', handlePaste);
-    return () => window.removeEventListener('paste', handlePaste);
-  }, [onPasteLogs, selectedDate, readOnly, suspended]);
+    // Paste is handled on Ctrl+V in the keydown effect above, reading the
+    // in-app clipboard. The old system-clipboard JSON listener is gone: it
+    // never ran (onPasteLogs was never passed) and it leaked card content into
+    // the OS clipboard history.
+    return undefined;
+  }, []);
 
   const { todayPos, todayIsWithinRange } = useMemo(() => {
     const diff = now.getTime() - projectStart.getTime();
@@ -359,7 +409,7 @@ const Timeline: React.FC<TimelineProps> = ({
   }, [projectStart, totalDurationMs, now, getPosFromDate]);
 
   const handleContainerMouseDown = useCallback((e: React.MouseEvent) => {
-    if (suspended || showProjectSettings || showExportModal || exportError || pendingDeleteIds.length > 0 || (e.target as HTMLElement).closest('button, input, textarea, select, [role="dialog"]')) return;
+    if (suspended || showProjectSettings || showExportModal || exportError || (e.target as HTMLElement).closest('button, input, textarea, select, [role="dialog"]')) return;
     containerRef.current?.focus();
     if (isSpacePressed) {
        setIsPanning(true);
@@ -371,7 +421,7 @@ const Timeline: React.FC<TimelineProps> = ({
       setSelectionBox({ startX: e.clientX, startY: e.clientY, currentX: e.clientX, currentY: e.clientY });
       setSelectedDate(null); setSelectedPercentage(null);
     }
-  }, [isSpacePressed, readOnly, draggingLog, suspended, showProjectSettings, showExportModal, exportError, pendingDeleteIds]);
+  }, [isSpacePressed, readOnly, draggingLog, suspended, showProjectSettings, showExportModal, exportError]);
 
   const handleLogMouseDown = useCallback((e: React.MouseEvent, log: WorkLog, dateStr: string) => {
     e.stopPropagation(); 
@@ -646,7 +696,7 @@ const Timeline: React.FC<TimelineProps> = ({
       className={`w-full flex flex-col overflow-hidden bg-white relative transition-all select-none outline-none ${className || 'flex-1'} ${isPanning ? 'cursor-grabbing' : isSpacePressed ? 'cursor-grab' : ''}`}
       onMouseDown={handleContainerMouseDown}
       onClick={() => { 
-        if (suspended || showProjectSettings || showExportModal || exportError || pendingDeleteIds.length > 0) return;
+        if (suspended || showProjectSettings || showExportModal || exportError) return;
         if (ignoreClickRef.current) { ignoreClickRef.current = false; return; }
         if(!readOnly && !selectionBox) { setSelectedDate(null); setSelectedPercentage(null); setSelectedLogIds(new Set<string>()); } 
       }}
@@ -663,7 +713,7 @@ const Timeline: React.FC<TimelineProps> = ({
             </header>
             <div className="p-10 space-y-8">
               <div className="space-y-6">
-                <div><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">{t('Project Name')}</label><input value={project.name} onChange={(e) => onUpdateProject?.({ name: e.target.value })} className="w-full px-5 py-3.5 rounded-2xl bg-white border border-slate-200 text-slate-900 font-bold focus:border-indigo-600 focus:ring-4 focus:ring-indigo-50 outline-none transition-all shadow-sm" /></div>
+                <div><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">{t('Task Name')}</label><input value={project.name} onChange={(e) => onUpdateProject?.({ name: e.target.value })} className="w-full px-5 py-3.5 rounded-2xl bg-white border border-slate-200 text-slate-900 font-bold focus:border-indigo-600 focus:ring-4 focus:ring-indigo-50 outline-none transition-all shadow-sm" /></div>
                 <div><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">{t('Lead / Team')}</label><input value={project.personnel} onChange={(e) => onUpdateProject?.({ personnel: e.target.value })} className="w-full px-5 py-3.5 rounded-2xl bg-white border border-slate-200 text-slate-900 font-bold focus:border-indigo-600 focus:ring-4 focus:ring-indigo-50 outline-none transition-all shadow-sm" /></div>
                 <div className="grid grid-cols-2 gap-6">
                   <div><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">{t('Start Date')}</label><input type="date" value={project.startDate} onChange={(e) => onUpdateProject?.({ startDate: e.target.value })} className="w-full px-5 py-3.5 rounded-2xl bg-white border border-slate-200 text-slate-900 font-bold focus:border-indigo-600 focus:ring-4 focus:ring-indigo-50 outline-none transition-all shadow-sm" /></div>
@@ -698,21 +748,6 @@ const Timeline: React.FC<TimelineProps> = ({
         message={exportError ?? ''}
         cancelLabel={t('Close')}
         onCancel={() => setExportError(null)}
-      />
-
-      <AppDialog
-        open={pendingDeleteIds.length > 0}
-        tone="danger"
-        title={t('Delete cards?')}
-        message={t('Delete {{count}} selected cards? This cannot be undone.', { count: pendingDeleteIds.length })}
-        confirmLabel={t('Delete')}
-        onCancel={() => { setPendingDeleteIds([]); containerRef.current?.focus(); }}
-        onConfirm={() => {
-          onDeleteLogs?.(pendingDeleteIds);
-          setPendingDeleteIds([]);
-          setSelectedLogIds(new Set<string>());
-          containerRef.current?.focus();
-        }}
       />
 
       <div className="absolute top-6 left-6 right-6 z-50 flex flex-wrap gap-2" onMouseDown={e => e.stopPropagation()} onClick={e => e.stopPropagation()}>
@@ -755,9 +790,11 @@ const Timeline: React.FC<TimelineProps> = ({
                       
                       const editors = logCollaborators.filter(c => c.action === 'Editing');
                       const isBeingEdited = editors.length > 0;
+                      const isCollapsed = collapsedLogIds.has(log.id);
+                      const cardDateLabel = parseSafeDate(marker.dateStr).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 
                       return (
-                        <div key={log.id} data-log-id={log.id} onClick={(e) => e.stopPropagation()} onMouseDown={(e) => handleLogMouseDown(e, log, marker.dateStr)} onMouseEnter={() => setHoveredLogId(log.id)} onMouseLeave={() => setHoveredLogId(null)} onDoubleClick={(e) => { e.stopPropagation(); onSelectDate(marker.dateStr, log.id); }} style={{ marginBottom: logIdx === 0 ? '8px' : '-24px', zIndex: isDraggingThis || isBeingEdited ? 2000 : (100 - logIdx), transform: isDraggingThis ? 'scale(1.03) translateY(-4px)' : isSelected ? 'scale(1.03) translateY(-4px)' : 'none' }} className={`border p-2.5 rounded-xl shadow-sm transition-all relative overflow-visible group select-none ${isLocked || readOnly ? (readOnly ? 'cursor-pointer' : 'grayscale-[0.6] cursor-not-allowed') : draggingLog?.isCloning ? 'cursor-copy' : 'cursor-grab active:cursor-grabbing'} ${isPast && !isSelected ? 'grayscale-[0.5] opacity-75' : 'opacity-100 grayscale-0'} ${log.level === 1 ? 'w-52' : log.level === 2 ? 'w-48' : 'w-44'} ${isSelected ? 'ring-2 ring-indigo-500/50 border-indigo-600 bg-indigo-50' : log.level === 1 ? 'bg-slate-900 border-slate-900 text-white' : log.level === 2 ? 'bg-indigo-50 border-indigo-200' : 'bg-slate-50 border-slate-200'} ${isBeingEdited ? 'ring-4 ring-offset-2 ring-amber-400 border-amber-400' : ''}`}>
+                        <div key={log.id} data-log-id={log.id} onClick={(e) => e.stopPropagation()} onMouseDown={(e) => handleLogMouseDown(e, log, marker.dateStr)} onMouseEnter={() => setHoveredLogId(log.id)} onMouseLeave={() => setHoveredLogId(null)} onDoubleClick={(e) => { e.stopPropagation(); onSelectDate(marker.dateStr, log.id); }} title={isCollapsed ? `${log.author} · ${cardDateLabel}${log.summary ? ` · ${log.summary}` : ''}` : undefined} style={{ marginBottom: logIdx === 0 ? '8px' : '-24px', zIndex: isDraggingThis || isBeingEdited ? 2000 : (100 - logIdx), transform: isDraggingThis ? 'scale(1.03) translateY(-4px)' : isSelected ? 'scale(1.03) translateY(-4px)' : 'none' }} className={`border rounded-xl shadow-sm transition-all relative overflow-visible group select-none ${isLocked || readOnly ? (readOnly ? 'cursor-pointer' : 'grayscale-[0.6] cursor-not-allowed') : draggingLog?.isCloning ? 'cursor-copy' : 'cursor-grab active:cursor-grabbing'} ${isPast && !isSelected ? 'grayscale-[0.5] opacity-75' : 'opacity-100 grayscale-0'} ${isCollapsed ? 'w-16 p-1.5' : `p-2.5 ${log.level === 1 ? 'w-52' : log.level === 2 ? 'w-48' : 'w-44'}`} ${isSelected ? 'ring-2 ring-indigo-500/50 border-indigo-600 bg-indigo-50' : log.level === 1 ? 'bg-slate-900 border-slate-900 text-white' : log.level === 2 ? 'bg-indigo-50 border-indigo-200' : 'bg-slate-50 border-slate-200'} ${isBeingEdited ? 'ring-4 ring-offset-2 ring-amber-400 border-amber-400' : ''}`}>
                           
                           {/* EDITING LABEL */}
                           {isBeingEdited && (
@@ -785,10 +822,25 @@ const Timeline: React.FC<TimelineProps> = ({
                             </div>
                           )}
 
-                          {!readOnly && onToggleLock && (<button onMouseDown={e => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); onToggleLock?.(log.id, marker.dateStr); }} className={`absolute top-1 right-1 w-5 h-5 flex items-center justify-center rounded-full transition-all z-50 ${!!log.isLocked ? 'text-slate-400 bg-slate-100 opacity-100' : 'opacity-0 group-hover:opacity-100 text-slate-300 hover:text-indigo-500 hover:bg-white'}`} title={!!log.isLocked ? t('Unlock Log') : t('Lock Log')}><i className={`fas ${!!log.isLocked ? 'fa-lock' : 'fa-lock-open'} text-[9px]`}></i></button>)}
-                          <div className="flex items-center gap-2 mb-1 overflow-hidden"><div className={`w-2 h-2 rounded-full flex-shrink-0 ${log.level === 1 ? 'bg-amber-400' : log.level === 2 ? 'bg-indigo-500' : 'bg-slate-300'}`}></div><span className={`text-sm font-bold leading-snug line-clamp-2 tracking-tight mt-[1px] ${isSelected ? 'text-indigo-900' : log.level === 1 ? 'text-amber-100' : log.level === 2 ? 'text-indigo-900' : 'text-slate-800'}`}>{log.author}</span></div>
-                          <div className={`text-xs font-medium opacity-70 mb-1.5 flex items-center gap-1 ${log.level === 1 && !isSelected ? 'text-amber-200' : 'text-slate-500'}`}><i className="far fa-calendar text-[7px]"></i>{parseSafeDate(marker.dateStr).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</div>
-                          <p className={`text-xs line-clamp-2 leading-relaxed ${isSelected ? 'text-indigo-800' : log.level === 1 ? 'text-slate-300' : 'text-slate-500'}`}>{log.summary || t('Pending update...')}</p>
+                          {/* COLLAPSE TOGGLE — bottom-right corner so it never
+                              collides with the lock button (top-right) or the
+                              collaborator avatars / editing badge above the card. */}
+                          <button onMouseDown={e => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); toggleCollapsedLogs([log.id]); }} className={`absolute -bottom-2 -right-2 w-5 h-5 flex items-center justify-center rounded-full transition-all z-50 border border-white shadow-md ${isCollapsed ? 'opacity-100 bg-indigo-500 text-white' : 'opacity-0 group-hover:opacity-100 bg-white text-slate-400 hover:text-indigo-500'}`} title={isCollapsed ? t('Expand card') : t('Collapse card')} aria-label={isCollapsed ? t('Expand card') : t('Collapse card')} aria-pressed={isCollapsed}><i className={`fas ${isCollapsed ? 'fa-chevron-down' : 'fa-chevron-up'} text-[8px]`}></i></button>
+
+                          {!isCollapsed && !readOnly && onToggleLock && (<button onMouseDown={e => e.stopPropagation()} onClick={(e) => { e.stopPropagation(); onToggleLock?.(log.id, marker.dateStr); }} className={`absolute top-1 right-1 w-5 h-5 flex items-center justify-center rounded-full transition-all z-50 ${!!log.isLocked ? 'text-slate-400 bg-slate-100 opacity-100' : 'opacity-0 group-hover:opacity-100 text-slate-300 hover:text-indigo-500 hover:bg-white'}`} title={!!log.isLocked ? t('Unlock Log') : t('Lock Log')}><i className={`fas ${!!log.isLocked ? 'fa-lock' : 'fa-lock-open'} text-[9px]`}></i></button>)}
+
+                          {isCollapsed ? (
+                            /* Compact state: one level-coloured initial. Stays
+                               draggable and selectable, and the title attribute
+                               carries the author / date / summary for hover. */
+                            <div className={`w-6 h-6 mx-auto rounded-full flex items-center justify-center text-[11px] font-black flex-shrink-0 ${isSelected ? 'bg-indigo-600 text-white' : log.level === 1 ? 'bg-amber-400 text-slate-900' : log.level === 2 ? 'bg-indigo-500 text-white' : 'bg-slate-300 text-slate-700'}`}>{log.author.trim().charAt(0).toUpperCase() || '?'}</div>
+                          ) : (
+                            <>
+                              <div className="flex items-center gap-2 mb-1 overflow-hidden"><div className={`w-2 h-2 rounded-full flex-shrink-0 ${log.level === 1 ? 'bg-amber-400' : log.level === 2 ? 'bg-indigo-500' : 'bg-slate-300'}`}></div><span className={`text-sm font-bold leading-snug line-clamp-2 tracking-tight mt-[1px] ${isSelected ? 'text-indigo-900' : log.level === 1 ? 'text-amber-100' : log.level === 2 ? 'text-indigo-900' : 'text-slate-800'}`}>{log.author}</span></div>
+                              <div className={`text-xs font-medium opacity-70 mb-1.5 flex items-center gap-1 ${log.level === 1 && !isSelected ? 'text-amber-200' : 'text-slate-500'}`}><i className="far fa-calendar text-[7px]"></i>{cardDateLabel}</div>
+                              <p className={`text-xs line-clamp-2 leading-relaxed ${isSelected ? 'text-indigo-800' : log.level === 1 ? 'text-slate-300' : 'text-slate-500'}`}>{log.summary || t('Pending update...')}</p>
+                            </>
+                          )}
                         </div>
                       );
                     })}
@@ -870,6 +922,7 @@ const Timeline: React.FC<TimelineProps> = ({
       <footer className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3 z-10" onMouseDown={e => e.stopPropagation()} onClick={e => e.stopPropagation()}>
         <p className="text-xs text-slate-500">{t(readOnly ? 'Double-click to view · Space to pan' : logMarkers.length === 0 ? 'Double-click the timeline to add your first card' : 'Drag to move · Double-click to edit · Space to pan')}</p>
         <div className="flex items-center gap-4">
+          <span className="text-[9px] font-black text-slate-300 uppercase tracking-widest flex items-center gap-1.5" title={t('Collapse / expand cards')}><kbd className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-400 border border-slate-200">E</kbd> {t('Collapse / expand cards')}</span>
           <button onClick={() => setShowExportModal(true)} disabled={isExporting} className="text-[9px] font-black text-emerald-600 uppercase tracking-widest border border-slate-200 px-4 py-2 rounded-full bg-white shadow-sm flex items-center gap-2 hover:bg-emerald-50 transition-colors disabled:opacity-50"><i className={`fas ${isExporting ? 'fa-spinner fa-spin' : 'fa-camera'}`}></i> { isExporting ? t('Processing...') : t('Snapshot') }</button>
           {!readOnly && onUpdateProject && (<button onClick={(e) => { e.stopPropagation(); setShowProjectSettings(true); }} className="text-[9px] font-black text-slate-600 uppercase tracking-widest border border-slate-200 px-4 py-2 rounded-full bg-white shadow-sm flex items-center gap-2 hover:bg-slate-50 transition-colors"><i className="fas fa-sliders-h"></i> {t('Settings')}</button>)}
           <div className="flex items-center bg-white rounded-full border border-slate-200 shadow-sm mx-2">

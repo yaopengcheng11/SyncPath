@@ -42,6 +42,11 @@ dist-ssr
 # Prisma local artifacts
 apps/api/prisma/dev.db*
 
+# Local PostgreSQL clusters and database snapshots
+.postgres/
+.postgres-backup*/
+*.dump
+
 # Test artifacts
 coverage
 .nyc_output

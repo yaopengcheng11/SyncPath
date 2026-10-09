@@ -62,6 +62,8 @@ export interface User {
 
 export interface Collaborator {
   clientId: number;
+  userId?: string;
+  displayName?: string | null;
   username: string;
   color: string;
   action: string; 

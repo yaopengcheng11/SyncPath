@@ -44,7 +44,9 @@ export class WorkspacesService {
     // example Chinese text) has no Latin characters to transliterate.
     const workspaceId = newWorkspaceId();
     const requestedSlug = typeof input.slug === 'string' ? input.slug.trim() : '';
-    const slug = (requestedSlug || slugify(name) || `workspace-${workspaceId.slice(0, 8)}`).toLowerCase();
+    // UUIDv7 prefixes contain the timestamp; preserve the complete id so
+    // consecutive non-Latin names cannot receive the same fallback slug.
+    const slug = (requestedSlug || slugify(name) || `ws-${workspaceId.replace(/-/g, '')}`).toLowerCase();
     if (!/^[a-z0-9][a-z0-9-]{1,40}$/.test(slug)) {
       throw new ConflictException({
         code: 'invalid_slug',

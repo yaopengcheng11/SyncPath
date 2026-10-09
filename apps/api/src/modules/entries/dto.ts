@@ -48,6 +48,11 @@ export class UpdateEntryBody {
   @ApiProperty({ required: false, type: [String] }) mentionedUserIds?: string[];
   @ApiProperty({ required: false, enum: ['pending', 'completed'] })
   status?: ProgressStatus;
+  @ApiProperty({
+    required: false,
+    description: 'Toggle the lock. The only field a locked card accepts; every other change is rejected while the lock is set.'
+  })
+  isLocked?: boolean;
 
   @ApiProperty({ minimum: 1, description: 'Optimistic-lock revision.' })
   expectedRevision!: number;
@@ -67,6 +72,8 @@ export class PublicEntry {
   @ApiProperty({ type: [String] }) mentionedUserIds!: string[];
   @ApiProperty({ enum: ['pending', 'completed'] })
   status!: ProgressStatus;
+  @ApiProperty({ description: 'Locked cards cannot be moved, edited, or deleted.' })
+  isLocked!: boolean;
   @ApiProperty({ minimum: 1 }) revision!: number;
   @ApiProperty({ example: '2026-09-16T10:49:09.010Z' })
   createdAt!: string;
@@ -87,6 +94,7 @@ export function toPublicEntry(e: ProgressEntry): PublicEntry {
     mentionAll: e.mentionAll,
     mentionedUserIds: e.mentionedUserIds,
     status: e.status,
+    isLocked: e.isLocked,
     revision: e.revision,
     createdAt: e.createdAt.toISOString(),
     updatedAt: e.updatedAt.toISOString()

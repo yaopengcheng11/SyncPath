@@ -12,6 +12,7 @@ import { ProjectMembersModule } from './modules/project-members/project-members.
 import { WorkspaceMembersModule } from './modules/workspace-members/workspace-members.module';
 import { CollaborationModule } from './modules/collaboration/collaboration.module';
 import { MentionsModule } from './modules/mentions/mentions.module';
+import { SharingModule } from './modules/sharing/sharing.module';
 import {
   ProjectRolesGuard,
   WorkspaceRolesGuard
@@ -29,7 +30,8 @@ import {
     ProjectMembersModule,
     WorkspaceMembersModule,
     CollaborationModule,
-    MentionsModule
+    MentionsModule,
+    SharingModule
   ],
   providers: [
     { provide: APP_GUARD, useClass: SessionAuthGuard },

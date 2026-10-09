@@ -5,11 +5,13 @@ import { LanguageSwitcher, useI18n } from '../i18n';
 
 interface AuthScreenProps {
   onAuthSuccess: (user: User) => void | Promise<void>;
+  initialMode?: 'login' | 'signup';
+  sharedAccess?: boolean;
 }
 
-const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
+const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess, initialMode = 'login', sharedAccess = false }) => {
   const { t } = useI18n();
-  const [mode, setMode] = useState<'login' | 'signup'>('login');
+  const [mode, setMode] = useState<'login' | 'signup'>(initialMode);
   const [email, setEmail] = useState('');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
@@ -70,6 +72,7 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess }) => {
           </div>
           <h1 className="text-3xl font-black text-slate-800 tracking-tighter">SyncPath</h1>
           <p className="text-slate-400 text-[10px] font-black uppercase tracking-[0.3em] mt-2">{t('Team Roadmap Platform')}</p>
+          {sharedAccess && <p className="mt-4 rounded-xl bg-indigo-50 px-4 py-3 text-sm leading-6 text-indigo-700">{t('Register or sign in to view shared content. You can view only.')}</p>}
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-6">

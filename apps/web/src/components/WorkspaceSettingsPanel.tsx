@@ -41,7 +41,7 @@ const WorkspaceSettingsPanel: React.FC<Props> = ({
       const updated = await renameWorkspace(nextName);
       onUpdated(updated);
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('Unable to update workspace.'));
+      setError(err instanceof Error ? err.message : t('Unable to update project.'));
     } finally {
       setSaving(false);
     }
@@ -56,7 +56,7 @@ const WorkspaceSettingsPanel: React.FC<Props> = ({
       setArchiveConfirmOpen(false);
       onArchived();
     } catch (err) {
-      setError(err instanceof Error ? err.message : t('Unable to archive workspace.'));
+      setError(err instanceof Error ? err.message : t('Unable to archive project.'));
     } finally {
       setArchiving(false);
     }
@@ -67,25 +67,18 @@ const WorkspaceSettingsPanel: React.FC<Props> = ({
       <aside className="w-full max-w-xl h-full bg-white shadow-2xl flex flex-col" onMouseDown={(event) => event.stopPropagation()}>
         <header className="px-8 py-7 border-b border-slate-100 flex items-start justify-between">
           <div>
-            <p className="text-[10px] font-black uppercase tracking-[0.22em] text-indigo-500">{t('Workspace settings')}</p>
+            <p className="text-[10px] font-black uppercase tracking-[0.22em] text-indigo-500">{t('Project settings')}</p>
             <h2 className="text-2xl font-black text-slate-900 mt-1">{workspace.name}</h2>
             <p className="text-sm text-slate-500 mt-1">
               {t('Your role:')} <span className="font-black text-slate-700">{t(workspace.role)}</span>
             </p>
           </div>
-          <button onClick={onClose} className="w-10 h-10 rounded-xl hover:bg-slate-100 text-slate-400" aria-label={t('Close workspace settings')}>
+          <button onClick={onClose} className="w-10 h-10 rounded-xl hover:bg-slate-100 text-slate-400" aria-label={t('Close project settings')}>
             <i className="fas fa-times"></i>
           </button>
         </header>
 
         <div className="flex-1 overflow-y-auto px-8 py-8">
-          <div className="mb-8 rounded-2xl border border-indigo-100 bg-indigo-50/60 p-5">
-            <p className="text-sm font-black text-indigo-900">{t('What does Owner mean?')}</p>
-            <p className="text-sm text-indigo-800/80 leading-6 mt-2">
-              {t('Owner is the highest workspace role. The Owner manages members, can rename the workspace, and can archive it.')}
-            </p>
-          </div>
-
           <button
             type="button"
             onClick={onManageMembers}
@@ -93,7 +86,7 @@ const WorkspaceSettingsPanel: React.FC<Props> = ({
           >
             <span>
               <span className="block text-sm font-black text-slate-800">{t('Team members')}</span>
-              <span className="block text-xs text-slate-400 mt-1">{t('Manage people and workspace roles')}</span>
+              <span className="block text-xs text-slate-400 mt-1">{t('Manage people and project roles')}</span>
             </span>
             <i className="fas fa-arrow-right text-xs text-slate-400"></i>
           </button>
@@ -102,7 +95,7 @@ const WorkspaceSettingsPanel: React.FC<Props> = ({
             <form onSubmit={save} className="space-y-4">
               <div>
                 <label htmlFor="workspace-name" className="block text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">
-                  {t('Workspace name')}
+                  {t('Project name')}
                 </label>
                 <input
                   id="workspace-name"
@@ -121,13 +114,13 @@ const WorkspaceSettingsPanel: React.FC<Props> = ({
               </button>
             </form>
           ) : (
-            <p className="text-sm text-slate-500">{t('Only the workspace Owner or Admin can change workspace settings.')}</p>
+            <p className="text-sm text-slate-500">{t('Only the project Owner or Admin can change project settings.')}</p>
           )}
 
           <div className="mt-12 pt-7 border-t border-slate-100">
             <p className="text-[10px] font-black uppercase tracking-widest text-slate-400">{t('Danger zone')}</p>
             <p className="text-sm text-slate-500 mt-2 leading-6">
-              {t('Archiving hides this workspace and all of its projects from the team. The data remains preserved for a future recovery workflow.')}
+              {t('Archiving hides this project and all of its tasks from the team. The data remains preserved for a future recovery workflow.')}
             </p>
             <button
               type="button"
@@ -135,9 +128,9 @@ const WorkspaceSettingsPanel: React.FC<Props> = ({
               disabled={!canArchive || saving || archiving}
               className="mt-4 px-5 py-3 rounded-xl border border-red-200 text-red-600 text-xs font-black hover:bg-red-50 disabled:opacity-40 disabled:cursor-not-allowed"
             >
-              {archiving ? t('Archiving…') : t('Archive workspace')}
+              {archiving ? t('Archiving…') : t('Archive project')}
             </button>
-            {!canArchive && <p className="text-[11px] text-slate-400 mt-2">{t('Only the workspace Owner can archive a workspace.')}</p>}
+            {!canArchive && <p className="text-[11px] text-slate-400 mt-2">{t('Only the project Owner can archive a project.')}</p>}
           </div>
 
           {error && <div className="mt-6 px-4 py-3 rounded-xl bg-red-50 text-red-700 text-sm">{error}</div>}
@@ -147,9 +140,9 @@ const WorkspaceSettingsPanel: React.FC<Props> = ({
         open={archiveConfirmOpen}
         tone="danger"
         title={`${t('Archive')} ${workspace.name}?`}
-        message={t('Its projects will be hidden from the team. The data will be preserved and can be recovered through a future workspace recovery flow.')}
-        confirmLabel={t('Archive workspace')}
-        cancelLabel={t('Keep workspace')}
+        message={t('Its tasks will be hidden from the team. The data will be preserved and can be recovered through a future project recovery flow.')}
+        confirmLabel={t('Archive project')}
+        cancelLabel={t('Keep project')}
         confirmDisabled={archiving}
         onConfirm={() => void archive()}
         onCancel={() => {

@@ -1,5 +1,6 @@
 import {
   Body,
+  ConflictException,
   Controller,
   Delete,
   Get,
@@ -10,7 +11,7 @@ import {
   Query,
   UseGuards
 } from '@nestjs/common';
-import { ApiOperation, ApiTags } from '@nestjs/swagger';
+import { ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { CurrentUser } from '../identity/current-user.decorator';
 import { ProjectRolesGuard } from '../../common/rbac/guards';
 import { ProjectRoles, ProjectContextParam } from '../../common/rbac/guards';
@@ -119,12 +120,33 @@ export class EntryActionsController {
   }
 
   @Delete(':id')
-  @ApiOperation({ summary: 'Soft-delete a progress entry.' })
+  @ApiOperation({
+    summary: 'Soft-delete a progress entry (revision-checked via expectedRevision).'
+  })
+  @ApiQuery({
+    name: 'expectedRevision',
+    required: false,
+    description: 'Optimistic-lock revision of the card the caller last saw.'
+  })
   @HttpCode(204)
   @ProjectRoles('Lead', 'Editor')
-  async remove(@CurrentUser() user: User, @Param('id') id: string): Promise<void> {
+  async remove(
+    @CurrentUser() user: User,
+    @Param('id') id: string,
+    @Query('expectedRevision') expectedRevision?: string
+  ): Promise<void> {
     const entry = await this.entries.getById(id);
-    await this.entries.softDelete({ entry });
+    const parsed =
+      expectedRevision === undefined || expectedRevision === ''
+        ? undefined
+        : Number(expectedRevision);
+    if (parsed !== undefined && !Number.isInteger(parsed)) {
+      throw new ConflictException({
+        code: 'invalid_expected_revision',
+        message: 'expectedRevision must be an integer.'
+      });
+    }
+    await this.entries.softDelete({ entry, expectedRevision: parsed });
     this.collaboration.publish({ projectId: entry.projectId, type: 'entry.deleted', actor: user, data: { entryId: entry.id } });
   }
 }

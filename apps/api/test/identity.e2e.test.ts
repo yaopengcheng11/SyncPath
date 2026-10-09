@@ -83,7 +83,7 @@ describe('AC-01 identity lifecycle', () => {
     await prisma.workspace.deleteMany({
       where: { slug: { startsWith: 'ac01-' } } }
     );
-    // Chinese-only names use the generated `workspace-*` fallback slug, so
+    // Chinese-only names use a generated internal fallback slug, so
     // clean all workspaces owned by this fixture user before deleting it.
     await prisma.workspace.deleteMany({
       where: { owner: { username: { startsWith: 'ac01_' } } }
@@ -154,7 +154,7 @@ describe('AC-01 identity lifecycle', () => {
     );
     expect(created.status).toBe(201);
     expect(created.body.name).toBe('阿斯顿产品团队');
-    expect(created.body.slug).toMatch(/^workspace-[a-z0-9-]+$/);
+    expect(created.body.slug).toMatch(/^[a-z0-9][a-z0-9-]{1,40}$/);
 
     const listed = await getJson<Array<{ name: string; slug: string }>>(
       '/api/v1/workspaces',
@@ -165,6 +165,36 @@ describe('AC-01 identity lifecycle', () => {
 
     const archived = await del(`/api/v1/workspaces/${created.body.id}`, cookie);
     expect(archived.status).toBe(204);
+  });
+
+  it('creates consecutive Chinese-named workspaces with distinct valid internal slugs', async () => {
+    const first = await postJson<{ id: string; name: string; slug: string }>(
+      '/api/v1/workspaces',
+      { name: '多项目验收甲' },
+      cookie
+    );
+    const second = await postJson<{ id: string; name: string; slug: string }>(
+      '/api/v1/workspaces',
+      { name: '多项目验收乙' },
+      cookie
+    );
+
+    expect(first.status).toBe(201);
+    expect(second.status).toBe(201);
+    expect(first.body.name).toBe('多项目验收甲');
+    expect(second.body.name).toBe('多项目验收乙');
+    expect(first.body.slug).toMatch(/^[a-z0-9][a-z0-9-]{1,40}$/);
+    expect(second.body.slug).toMatch(/^[a-z0-9][a-z0-9-]{1,40}$/);
+    expect(second.body.slug).not.toBe(first.body.slug);
+
+    const listed = await getJson<Array<{ id: string }>>('/api/v1/workspaces', cookie);
+    expect(listed.status).toBe(200);
+    expect(listed.body.map((workspace) => workspace.id)).toEqual(expect.arrayContaining([first.body.id, second.body.id]));
+
+    for (const created of [first, second]) {
+      const archived = await del(`/api/v1/workspaces/${created.body.id}`, cookie);
+      expect(archived.status).toBe(204);
+    }
   });
 
   it('returns 401 for /me with no cookie after logout', async () => {

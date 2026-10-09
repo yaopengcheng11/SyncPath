@@ -205,7 +205,7 @@ export interface paths {
         get: operations["EntryActionsController_getOne"];
         put?: never;
         post?: never;
-        /** Soft-delete a progress entry. */
+        /** Soft-delete a progress entry (revision-checked via expectedRevision). */
         delete: operations["EntryActionsController_remove"];
         options?: never;
         head?: never;
@@ -370,6 +370,76 @@ export interface paths {
         patch: operations["WorkspaceMembersController_changeRole"];
         trace?: never;
     };
+    "/api/v1/workspaces/{workspaceId}/share-links": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List workspace share metadata; raw tokens are never returned. */
+        get: operations["SharingController_listWorkspace"];
+        put?: never;
+        /** Create a read-only share link for a workspace (administrator only). */
+        post: operations["SharingController_createWorkspace"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{projectId}/share-links": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List project share metadata; raw tokens are never returned. */
+        get: operations["SharingController_listProject"];
+        put?: never;
+        /** Create a read-only share link for one project (Lead or workspace administrator). */
+        post: operations["SharingController_createProject"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/share-links/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /** Revoke a link using current management permission on its actual target. */
+        delete: operations["SharingController_revoke"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/share-links/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Resolve shared read-only content after authentication; token is sent in the body. */
+        post: operations["SharingController_resolve"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -493,6 +563,8 @@ export interface components {
             mentionedUserIds: string[];
             /** @enum {string} */
             status: "pending" | "completed";
+            /** @description Locked cards cannot be moved, edited, or deleted. */
+            isLocked: boolean;
             revision: number;
             /** @example 2026-09-16T10:49:09.010Z */
             createdAt: string;
@@ -533,6 +605,8 @@ export interface components {
             mentionedUserIds?: string[];
             /** @enum {string} */
             status?: "pending" | "completed";
+            /** @description Toggle the lock. The only field a locked card accepts; every other change is rejected while the lock is set. */
+            isLocked?: boolean;
             /** @description Optimistic-lock revision. */
             expectedRevision: number;
         };
@@ -585,6 +659,40 @@ export interface components {
         ChangeWorkspaceRoleBody: {
             /** @enum {string} */
             role: "Owner" | "Admin" | "Member";
+        };
+        CreatedShareLink: {
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            kind: "workspace" | "project";
+            createdAt: string;
+            revokedAt: string | null;
+            /** @description Opaque capability returned only once; place it in the URL fragment. */
+            token: string;
+        };
+        PublicShareLink: {
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            kind: "workspace" | "project";
+            createdAt: string;
+            revokedAt: string | null;
+        };
+        ResolveShareLinkBody: {
+            /** @description Opaque token from the shared URL fragment. */
+            token: string;
+        };
+        SharedWorkspace: {
+            /** Format: uuid */
+            id: string;
+            name: string;
+        };
+        SharedContent: {
+            /** @enum {string} */
+            kind: "workspace" | "project";
+            workspace: components["schemas"]["SharedWorkspace"];
+            projects: components["schemas"]["PublicProject"][];
+            entries: components["schemas"]["PublicEntry"][];
         };
     };
     responses: never;
@@ -1050,7 +1158,10 @@ export interface operations {
     };
     EntryActionsController_remove: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Optimistic-lock revision of the card the caller last saw. */
+                expectedRevision?: string;
+            };
             header?: never;
             path: {
                 id: string;
@@ -1354,6 +1465,132 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    SharingController_listWorkspace: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspaceId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicShareLink"][];
+                };
+            };
+        };
+    };
+    SharingController_createWorkspace: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspaceId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreatedShareLink"];
+                };
+            };
+        };
+    };
+    SharingController_listProject: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PublicShareLink"][];
+                };
+            };
+        };
+    };
+    SharingController_createProject: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                projectId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreatedShareLink"];
+                };
+            };
+        };
+    };
+    SharingController_revoke: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    SharingController_resolve: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResolveShareLinkBody"];
+            };
+        };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SharedContent"];
+                };
             };
         };
     };
