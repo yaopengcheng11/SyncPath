@@ -3,6 +3,9 @@ import type { Prisma, Project } from '@prisma/client';
 import { newId } from '@syncpath/domain';
 import { PrismaService } from '../../common/prisma/prisma.service';
 import { CollaborationService } from '../collaboration/collaboration.service';
+import { toPublicEntry } from '../entries/dto';
+import { toPublicProject } from '../projects/dto';
+import type { MentionTimelineContent } from './timeline.dto';
 
 export interface MentionSelection {
   mentionAll?: boolean;
@@ -32,7 +35,7 @@ export class MentionsService {
     return memberships.map(({ user }) => user);
   }
 
-  async resolve(project: Project, actorId: string, selection: MentionSelection): Promise<string[]> {
+  async resolve(project: Project, selection: MentionSelection): Promise<string[]> {
     const explicit = selection.mentionedUserIds ?? [];
     if (!Array.isArray(explicit) || explicit.length > 100 || explicit.some((id) => typeof id !== 'string')) {
       throw new BadRequestException({ code: 'invalid_mentions', message: 'Mentioned users must be a list of at most 100 user IDs.' });
@@ -44,9 +47,9 @@ export class MentionsService {
     if (explicit.some((id) => !allowed.has(id))) {
       throw new BadRequestException({ code: 'invalid_mentions', message: 'A mentioned user is not a project member.' });
     }
-    const recipients = new Set(selection.mentionAll ? allowed : explicit);
-    recipients.delete(actorId);
-    return [...recipients];
+    // Persist the selected people, including the author. A self-mention is
+    // meaningful on the user's timeline even though it needs no inbox alert.
+    return [...new Set(selection.mentionAll ? allowed : explicit)];
   }
 
   notificationRows(input: {
@@ -55,7 +58,7 @@ export class MentionsService {
     actorId: string;
     recipients: string[];
   }) {
-    return input.recipients.map((recipientId) => ({
+    return input.recipients.filter((recipientId) => recipientId !== input.actorId).map((recipientId) => ({
       id: newId(),
       workspaceId: input.project.workspaceId,
       projectId: input.project.id,
@@ -111,5 +114,39 @@ export class MentionsService {
       where: { id, recipientId: userId, readAt: null },
       data: { readAt: new Date() }
     });
+  }
+
+  async timeline(userId: string, workspaceIds?: string[]): Promise<MentionTimelineContent> {
+    const memberships = await this.prisma.membership.findMany({
+      where: { userId, workspace: { deletedAt: null } },
+      include: { workspace: { select: { id: true, name: true } } },
+      orderBy: { createdAt: 'asc' }
+    });
+    // The entry query checks membership and task authority itself. The filter
+    // narrows that predicate; submitted IDs never grant access or reveal names.
+    const entries = await this.prisma.progressEntry.findMany({
+      where: {
+        deletedAt: null, mentionedUserIds: { has: userId },
+        project: {
+          deletedAt: null, status: 'active',
+          ...(workspaceIds === undefined ? {} : { workspaceId: { in: workspaceIds } }),
+          workspace: { deletedAt: null, memberships: { some: { userId } } },
+          OR: [
+            { members: { some: { userId } } },
+            { workspace: { memberships: { some: { userId, role: { in: ['Owner', 'Admin'] } } } } }
+          ]
+        }
+      },
+      include: { project: { include: {
+        members: { where: { userId }, select: { role: true } },
+        workspace: { select: { id: true, name: true, memberships: { where: { userId }, select: { role: true } } } }
+      } } },
+      orderBy: [{ weekStartDate: 'asc' }, { id: 'asc' }]
+    });
+    return { workspaces: memberships.map((membership) => membership.workspace), items: entries.map((entry) => {
+      const workspaceRole = entry.project.workspace.memberships[0]?.role;
+      const role = workspaceRole === 'Owner' || workspaceRole === 'Admin' ? 'Lead' : entry.project.members[0]?.role ?? null;
+      return { workspace: { id: entry.project.workspace.id, name: entry.project.workspace.name }, project: toPublicProject(entry.project, role), entry: toPublicEntry(entry) };
+    }) };
   }
 }

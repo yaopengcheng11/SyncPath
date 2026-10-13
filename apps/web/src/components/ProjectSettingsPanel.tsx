@@ -11,6 +11,8 @@ import type { PublicProject } from '@syncpath/api-client';
 import { apiClient, ApiError } from '../services/api';
 import AppDialog from './AppDialog';
 import { useI18n } from '../i18n';
+import DatePicker from './DatePicker';
+import { parseCalendarDate } from '../utils/calendarDate';
 
 export interface ProjectSettingsPanelProps {
   project: PublicProject;
@@ -26,6 +28,7 @@ export interface ProjectSettingsPanelProps {
     expectedRevision: number;
   }) => Promise<void>;
   onClose: () => void;
+  onManageMembers?: () => void;
 }
 
 interface SettingsDraft {
@@ -54,7 +57,8 @@ const ProjectSettingsPanel: React.FC<ProjectSettingsPanelProps> = ({
   project,
   canEdit,
   onSave,
-  onClose
+  onClose,
+  onManageMembers
 }) => {
   const { t } = useI18n();
   const [draft, setDraft] = useState<SettingsDraft>(() => draftFrom(project));
@@ -71,7 +75,7 @@ const ProjectSettingsPanel: React.FC<ProjectSettingsPanelProps> = ({
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape' && !savingRef.current) onClose();
+      if (event.key === 'Escape' && !event.defaultPrevented && !event.isComposing && !savingRef.current) onClose();
     };
     document.addEventListener('keydown', onKeyDown);
     return () => document.removeEventListener('keydown', onKeyDown);
@@ -96,7 +100,7 @@ const ProjectSettingsPanel: React.FC<ProjectSettingsPanelProps> = ({
 
   const validate = (value: SettingsDraft): string | null => {
     if (!value.name.trim()) return t('The task needs a name.');
-    if (!value.startDate || !value.endDate) return t('Both the start and end date are required.');
+    if (!parseCalendarDate(value.startDate) || !parseCalendarDate(value.endDate)) return t('Both the start and end date are required.');
     if (value.endDate < value.startDate) return t('The end date must be on or after the start date.');
     return null;
   };
@@ -138,9 +142,9 @@ const ProjectSettingsPanel: React.FC<ProjectSettingsPanelProps> = ({
   const inputClass = 'w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-800 outline-none transition focus:border-indigo-500 focus:ring-4 focus:ring-indigo-50 disabled:opacity-60';
 
   return (
-    <div className="fixed inset-0 z-[3000] bg-slate-950/40 backdrop-blur-sm flex justify-end" onMouseDown={() => !savingRef.current && onClose()}>
+    <div className="sp-modal-backdrop fixed inset-0 z-[3000] bg-slate-950/40 backdrop-blur-sm flex justify-end" onMouseDown={() => !savingRef.current && onClose()}>
       <aside
-        className="w-full max-w-xl h-full bg-white shadow-2xl flex flex-col"
+        className="sp-side-panel w-full max-w-xl h-full bg-white shadow-2xl flex flex-col"
         onMouseDown={(event) => event.stopPropagation()}
         aria-label={t('Task settings')}
       >
@@ -154,6 +158,10 @@ const ProjectSettingsPanel: React.FC<ProjectSettingsPanelProps> = ({
             <i className="fas fa-times"></i>
           </button>
         </header>
+
+        {onManageMembers && <div className="border-b border-slate-100 px-8 py-3">
+          <button type="button" disabled={saving} onClick={onManageMembers} className="flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-semibold text-indigo-600 transition hover:bg-indigo-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 disabled:opacity-40"><i className="fas fa-users" aria-hidden="true" />{t('Task members')}<i className="fas fa-chevron-right ml-2 text-[10px]" aria-hidden="true" /></button>
+        </div>}
 
         {!canEdit && (
           <div className="mx-8 mt-5 px-4 py-3 rounded-xl bg-slate-50 text-slate-600 text-sm">
@@ -196,25 +204,9 @@ const ProjectSettingsPanel: React.FC<ProjectSettingsPanelProps> = ({
               />
             </label>
 
-            <div className="grid grid-cols-2 gap-4">
-              <label className="block text-[10px] font-black uppercase tracking-widest text-slate-400">
-                {t('Start Date')}
-                <input
-                  type="date"
-                  value={draft.startDate}
-                  onChange={(event) => setDraft({ ...draft, startDate: event.target.value })}
-                  className={`mt-2 ${inputClass}`}
-                />
-              </label>
-              <label className="block text-[10px] font-black uppercase tracking-widest text-slate-400">
-                {t('End Date')}
-                <input
-                  type="date"
-                  value={draft.endDate}
-                  onChange={(event) => setDraft({ ...draft, endDate: event.target.value })}
-                  className={`mt-2 ${inputClass}`}
-                />
-              </label>
+            <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2">
+              <DatePicker label={t('Start Date')} value={draft.startDate} max={draft.endDate} disabled={saving || !canEdit} onChange={(date) => setDraft((current) => ({ ...current, startDate: date }))} />
+              <DatePicker label={t('End Date')} value={draft.endDate} min={draft.startDate} disabled={saving || !canEdit} onChange={(date) => setDraft((current) => ({ ...current, endDate: date }))} />
             </div>
 
             <label className="block text-[10px] font-black uppercase tracking-widest text-slate-400">

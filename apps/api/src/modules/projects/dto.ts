@@ -48,8 +48,8 @@ export class UpdateProjectBody {
     enum: ['private', 'workspace']
   })
   visibility?: 'private' | 'workspace';
-  @ApiProperty({ required: false, enum: ['active', 'archived'] })
-  status?: 'active' | 'archived';
+  @ApiProperty({ required: false, enum: ['active'] })
+  status?: 'active';
   @ApiProperty({ required: false, example: '#6366f1' })
   color?: string;
   @ApiProperty({ required: false, enum: ['CN', 'US', 'NONE'] })

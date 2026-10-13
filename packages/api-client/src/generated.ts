@@ -112,7 +112,7 @@ export interface paths {
         get: operations["WorkspacesController_getOne"];
         put?: never;
         post?: never;
-        /** Archive a workspace (Owner only). Children are hidden but data is preserved. */
+        /** Permanently delete a workspace and its children (Owner only). */
         delete: operations["WorkspacesController_remove"];
         options?: never;
         head?: never;
@@ -149,7 +149,7 @@ export interface paths {
         get: operations["ProjectsController_getOne"];
         put?: never;
         post?: never;
-        /** Soft-delete a project within the workspace. */
+        /** Permanently delete a project and its children within the workspace. */
         delete: operations["ProjectsController_remove"];
         options?: never;
         head?: never;
@@ -168,12 +168,46 @@ export interface paths {
         get: operations["ProjectByIdController_getOne"];
         put?: never;
         post?: never;
-        /** Soft-delete a project (Lead only). */
+        /** Permanently delete a project and its children (Lead only). */
         delete: operations["ProjectByIdController_remove"];
         options?: never;
         head?: never;
         /** Update a project (revision-checked via expectedRevision). */
         patch: operations["ProjectByIdController_update"];
+        trace?: never;
+    };
+    "/api/v1/projects/{projectId}/timeline-versions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List immutable timeline versions (task Lead or project administrator only). */
+        get: operations["TimelineHistoryController_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/projects/{projectId}/timeline-versions/{versionId}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Inspect a historical timeline snapshot and its field changes. */
+        get: operations["TimelineHistoryController_detail"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/projects/{projectId}/entries": {
@@ -205,7 +239,7 @@ export interface paths {
         get: operations["EntryActionsController_getOne"];
         put?: never;
         post?: never;
-        /** Soft-delete a progress entry (revision-checked via expectedRevision). */
+        /** Permanently delete a progress entry and its history content (revision-checked via expectedRevision). */
         delete: operations["EntryActionsController_remove"];
         options?: never;
         head?: never;
@@ -262,6 +296,23 @@ export interface paths {
         head?: never;
         /** Mark one of the signed-in user’s mentions as read. */
         patch: operations["MentionNotificationsController_markRead"];
+        trace?: never;
+    };
+    "/api/v1/mentions/timeline": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Combine the signed-in user’s currently accessible mentioned cards on one timeline. */
+        get: operations["MentionTimelineController_timeline"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/api/v1/imports/validate": {
@@ -440,6 +491,40 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/received-shares": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** List shares previously opened by the authenticated recipient, including unavailable snapshots. */
+        get: operations["SharingController_listReceived"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/received-shares/{id}/resolve": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reopen a recipient-owned receipt after rechecking the original share link. */
+        post: operations["SharingController_resolveReceived"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -537,13 +622,57 @@ export interface components {
             /** @enum {string} */
             visibility?: "private" | "workspace";
             /** @enum {string} */
-            status?: "active" | "archived";
+            status?: "active";
             /** @example #6366f1 */
             color?: string;
             /** @enum {string} */
             holidayRegion?: "CN" | "US" | "NONE";
             /** @description Optimistic-lock revision. */
             expectedRevision: number;
+        };
+        TimelineActor: {
+            id: string;
+            username: string;
+            displayName: string | null;
+        };
+        TimelineChange: {
+            /** @enum {string} */
+            entity: "task" | "card";
+            entityId: string;
+            title: string;
+            field: string;
+            before: string | null;
+            after: string | null;
+        };
+        TimelineVersionSummary: {
+            id: string;
+            projectId: string;
+            version: number;
+            createdAt: string;
+            actor: components["schemas"]["TimelineActor"] | null;
+            action: string;
+            entryId: string | null;
+            changes: components["schemas"]["TimelineChange"][];
+        };
+        TimelineVersionPage: {
+            items: components["schemas"]["TimelineVersionSummary"][];
+            nextBeforeVersion: number | null;
+        };
+        TimelineProjectSnapshot: {
+            id: string;
+            workspaceId: string;
+            name: string;
+            description: string | null;
+            startDate: string;
+            endDate: string;
+            /** @enum {string} */
+            visibility: "private" | "workspace";
+            /** @enum {string} */
+            status: "active" | "archived";
+            color: string;
+            holidayRegion: string | null;
+            revision: number;
+            deletedAt: string | null;
         };
         PublicEntry: {
             /** Format: uuid */
@@ -570,6 +699,21 @@ export interface components {
             createdAt: string;
             /** @example 2026-09-16T10:49:09.010Z */
             updatedAt: string;
+        };
+        TimelineSnapshot: {
+            project: components["schemas"]["TimelineProjectSnapshot"];
+            entries: components["schemas"]["PublicEntry"][];
+        };
+        TimelineVersionDetail: {
+            id: string;
+            projectId: string;
+            version: number;
+            createdAt: string;
+            actor: components["schemas"]["TimelineActor"] | null;
+            action: string;
+            entryId: string | null;
+            changes: components["schemas"]["TimelineChange"][];
+            snapshot: components["schemas"]["TimelineSnapshot"];
         };
         CreateEntryBody: {
             /**
@@ -633,6 +777,19 @@ export interface components {
             createdAt: string;
             readAt: string | null;
         };
+        MentionTimelineWorkspace: {
+            id: string;
+            name: string;
+        };
+        MentionTimelineItem: {
+            workspace: components["schemas"]["MentionTimelineWorkspace"];
+            project: components["schemas"]["PublicProject"];
+            entry: components["schemas"]["PublicEntry"];
+        };
+        MentionTimelineContent: {
+            workspaces: components["schemas"]["MentionTimelineWorkspace"][];
+            items: components["schemas"]["MentionTimelineItem"][];
+        };
         InviteMemberBody: {
             /** Format: uuid */
             userId?: string;
@@ -693,6 +850,22 @@ export interface components {
             workspace: components["schemas"]["SharedWorkspace"];
             projects: components["schemas"]["PublicProject"][];
             entries: components["schemas"]["PublicEntry"][];
+        };
+        ReceivedShareSharer: {
+            username: string;
+            displayName: string | null;
+        };
+        ReceivedShare: {
+            /** Format: uuid */
+            id: string;
+            /** @enum {string} */
+            kind: "workspace" | "project";
+            name: string;
+            workspaceName: string;
+            sharedBy: components["schemas"]["ReceivedShareSharer"];
+            receivedAt: string;
+            /** @enum {string} */
+            status: "active" | "unavailable";
         };
     };
     responses: never;
@@ -1090,6 +1263,58 @@ export interface operations {
             };
         };
     };
+    TimelineHistoryController_list: {
+        parameters: {
+            query?: {
+                beforeVersion?: number;
+                limit?: number;
+            };
+            header: {
+                "x-syncpath-user-id": string;
+                "X-SyncPath-User-Id"?: string;
+            };
+            path: {
+                projectId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TimelineVersionPage"];
+                };
+            };
+        };
+    };
+    TimelineHistoryController_detail: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-syncpath-user-id": string;
+                "X-SyncPath-User-Id"?: string;
+            };
+            path: {
+                projectId: string;
+                versionId: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TimelineVersionDetail"];
+                };
+            };
+        };
+    };
     ProjectEntriesController_list: {
         parameters: {
             query: {
@@ -1257,6 +1482,31 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    MentionTimelineController_timeline: {
+        parameters: {
+            query?: {
+                /** @description Comma separated project IDs; omitted means all projects, empty means none. */
+                workspaceIds?: string;
+            };
+            header: {
+                "x-syncpath-user-id": string;
+                "X-SyncPath-User-Id"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MentionTimelineContent"];
+                };
             };
         };
     };
@@ -1574,7 +1824,11 @@ export interface operations {
     SharingController_resolve: {
         parameters: {
             query?: never;
-            header?: never;
+            header: {
+                "x-syncpath-user-id": string;
+                /** @description Expected authenticated user ID; rejects a session changed by another browser tab. */
+                "X-SyncPath-User-Id"?: string;
+            };
             path?: never;
             cookie?: never;
         };
@@ -1583,6 +1837,54 @@ export interface operations {
                 "application/json": components["schemas"]["ResolveShareLinkBody"];
             };
         };
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SharedContent"];
+                };
+            };
+        };
+    };
+    SharingController_listReceived: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-syncpath-user-id": string;
+                /** @description Expected authenticated user ID; rejects a session changed by another browser tab. */
+                "X-SyncPath-User-Id"?: string;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReceivedShare"][];
+                };
+            };
+        };
+    };
+    SharingController_resolveReceived: {
+        parameters: {
+            query?: never;
+            header: {
+                "x-syncpath-user-id": string;
+                /** @description Expected authenticated user ID; rejects a session changed by another browser tab. */
+                "X-SyncPath-User-Id"?: string;
+            };
+            path: {
+                id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
         responses: {
             200: {
                 headers: {

@@ -3,7 +3,7 @@ import type { PublicEntry, PublicUser, SharedContent } from '@syncpath/api-clien
 import { apiClient } from '../services/api';
 import { LanguageSwitcher, useI18n } from '../i18n';
 import Timeline from './Timeline';
-import { classifySharedContentError, sharedEntriesToLogs, sharedProjectToTimeline, startSharedContentPolling, type SharedContentError } from './sharedContentState';
+import { classifySharedContentError, sharedContentScope, sharedEntriesToLogs, sharedProjectToTimeline, startSharedContentPolling, type SharedContentError, type SharedContentSource } from './sharedContentState';
 
 interface SharedSnapshot {
   scope: string;
@@ -18,9 +18,9 @@ const errorKeys: Record<SharedContentError, string> = {
   network: 'Cannot check access right now. Shared content is hidden until the connection is restored.'
 };
 
-const SharedContentView: React.FC<{ token: string; user: PublicUser; onExit: () => void; onSignOut: () => Promise<void> }> = ({ token, user, onExit, onSignOut }) => {
+const SharedContentView: React.FC<{ source: SharedContentSource; user: PublicUser; onExit: () => void; onSignOut: () => Promise<void>; onSessionExpired: () => void }> = ({ source, user, onExit, onSignOut, onSessionExpired }) => {
   const { t } = useI18n();
-  const scope = `${user.id}:${token}`;
+  const scope = sharedContentScope(user.id, source);
   const [snapshot, setSnapshot] = useState<SharedSnapshot>({ scope, content: null, busy: true, error: null });
   const [selection, setSelection] = useState<{ scope: string; taskId: string | null; entryId: string | null }>({ scope, taskId: null, entryId: null });
   const [signingOut, setSigningOut] = useState(false);
@@ -28,6 +28,10 @@ const SharedContentView: React.FC<{ token: string; user: PublicUser; onExit: () 
   const [reload, setReload] = useState(0);
   const pollerRef = useRef<ReturnType<typeof startSharedContentPolling<SharedContent>> | null>(null);
   const signOutBusyRef = useRef(false);
+  const sessionExpiredRef = useRef(onSessionExpired);
+  sessionExpiredRef.current = onSessionExpired;
+  const sourceKind = source.kind;
+  const sourceId = source.kind === 'token' ? source.token : source.receiptId;
 
   useEffect(() => {
     setSnapshot({ scope, content: null, busy: true, error: null });
@@ -35,12 +39,17 @@ const SharedContentView: React.FC<{ token: string; user: PublicUser; onExit: () 
     const poller = startSharedContentPolling<SharedContent>({
       load: async (signal) => {
         if (!navigator.onLine) throw new Error('Offline');
-        return apiClient.resolveShareLink(token, { signal });
+        const options = { signal, expectedUserId: user.id };
+        return sourceKind === 'token' ? apiClient.resolveShareLink(sourceId, options) : apiClient.resolveReceivedShare(sourceId, options);
       },
       onData: (content) => {
         if (navigator.onLine && !signOutBusyRef.current) setSnapshot({ scope, content, busy: false, error: null });
       },
-      onError: (error) => setSnapshot({ scope, content: null, busy: false, error: classifySharedContentError(error) }),
+      onError: (error) => {
+        const kind = classifySharedContentError(error);
+        setSnapshot({ scope, content: null, busy: false, error: kind });
+        if (kind === 'signin') sessionExpiredRef.current();
+      },
       onBusy: (busy) => setSnapshot((current) => current.scope === scope ? { ...current, busy } : current)
     });
     pollerRef.current = poller;
@@ -54,7 +63,7 @@ const SharedContentView: React.FC<{ token: string; user: PublicUser; onExit: () 
       window.removeEventListener('offline', offline);
       window.removeEventListener('online', online);
     };
-  }, [scope, token, reload]);
+  }, [scope, sourceKind, sourceId, user.id, reload]);
 
   const content = snapshot.scope === scope && !signingOut ? snapshot.content : null;
   const error = snapshot.scope === scope ? snapshot.error : null;

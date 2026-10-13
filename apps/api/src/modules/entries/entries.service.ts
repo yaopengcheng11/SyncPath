@@ -10,10 +10,11 @@ import { parseSafeDate } from '../../common/dates';
 import type { CreateEntryBody, ProgressLevel, UpdateEntryBody } from './dto';
 import { ENTRY_LOCKED_DELETE_MESSAGE, ENTRY_LOCKED_UPDATE_MESSAGE, isLockedUpdateRejected } from './entryLock';
 import { MentionsService } from '../mentions/mentions.service';
+import { TimelineHistoryService } from '../timeline-history/timeline-history.service';
 
 @Injectable()
 export class EntriesService {
-  constructor(private readonly prisma: PrismaService, private readonly mentions: MentionsService) {}
+  constructor(private readonly prisma: PrismaService, private readonly mentions: MentionsService, private readonly history: TimelineHistoryService) {}
 
   async listForProject(input: {
     projectId: string;
@@ -66,10 +67,12 @@ export class EntriesService {
         message: 'weekStartDate must fall inside the project date range.'
       });
     }
-    const recipients = await this.mentions.resolve(input.project, input.user.id, input.body);
+    const recipients = await this.mentions.resolve(input.project, input.body);
     const entryId = newProgressEntryId();
     const rows = this.mentions.notificationRows({ project: input.project, entryId, actorId: input.user.id, recipients });
     const entry = await this.prisma.$transaction(async (tx) => {
+      const context = await this.history.begin(tx, input.project.id);
+      this.assertDateRange(week, context.before.project.startDate, context.before.project.endDate);
       const created = await tx.progressEntry.create({
         data: {
           id: entryId,
@@ -87,6 +90,7 @@ export class EntriesService {
         }
       });
       await this.mentions.createNotifications(tx, rows);
+      await this.history.record(tx, context, input.user, 'entry.created', created.id);
       return created;
     });
     this.mentions.publish(rows);
@@ -142,7 +146,7 @@ export class EntriesService {
     let rows: ReturnType<MentionsService['notificationRows']> = [];
     if (changes.mentionAll !== undefined || changes.mentionedUserIds !== undefined) {
       const project = await this.prisma.project.findUniqueOrThrow({ where: { id: input.entry.projectId } });
-      const recipients = await this.mentions.resolve(project, input.user.id, {
+      const recipients = await this.mentions.resolve(project, {
         mentionAll: changes.mentionAll ?? input.entry.mentionAll,
         mentionedUserIds: changes.mentionedUserIds ?? input.entry.mentionedUserIds
       });
@@ -159,6 +163,8 @@ export class EntriesService {
     // Atomic CAS (RV-08): only one writer with the matching revision can
     // succeed; the loser's affected-rows count is 0 → 409.
     const updated = await this.prisma.$transaction(async (tx) => {
+      const context = await this.history.begin(tx, input.entry.projectId);
+      if (data.weekStartDate instanceof Date) this.assertDateRange(data.weekStartDate, context.before.project.startDate, context.before.project.endDate);
       const result = await tx.progressEntry.updateMany({
         where: {
           id: input.entry.id,
@@ -174,13 +180,14 @@ export class EntriesService {
         });
       }
       await this.mentions.createNotifications(tx, rows);
+      await this.history.record(tx, context, input.user, 'entry.updated', input.entry.id);
       return tx.progressEntry.findUniqueOrThrow({ where: { id: input.entry.id } });
     });
     this.mentions.publish(rows);
     return updated;
   }
 
-  async softDelete(input: { entry: ProgressEntry; expectedRevision?: number }): Promise<void> {
+  async delete(input: { entry: ProgressEntry; user: User; expectedRevision?: number }): Promise<void> {
     if (input.entry.isLocked) {
       throw new ConflictException({
         code: 'entry_locked',
@@ -198,16 +205,14 @@ export class EntriesService {
         message: `expectedRevision ${input.expectedRevision} does not match current ${input.entry.revision}.`
       });
     }
-    const result = await this.prisma.progressEntry.updateMany({
-      where: { id: input.entry.id, revision: input.entry.revision, deletedAt: null },
-      data: { deletedAt: new Date() }
-    });
-    if (result.count === 0) {
-      throw new ConflictException({
-        code: 'revision_conflict',
-        message: 'The card changed while you were reviewing it.'
+    await this.prisma.$transaction(async (tx) => {
+      const revision = await this.history.lock(tx, input.entry.projectId);
+      const result = await tx.progressEntry.deleteMany({
+        where: { id: input.entry.id, revision: input.entry.revision, isLocked: false, deletedAt: null }
       });
-    }
+      if (result.count === 0) throw new ConflictException({ code: 'revision_conflict', message: 'The card changed while you were reviewing it.' });
+      await this.history.removeEntry(tx, { projectId: input.entry.projectId, revision }, input.entry.id);
+    });
   }
 
   /**
@@ -231,6 +236,7 @@ export class EntriesService {
   }> {
     const created: ProgressEntry[] = [];
     const skipped: Array<{ index: number; reason: string }> = [];
+    const author = await this.prisma.user.findUniqueOrThrow({ where: { id: input.authorId } });
     for (let i = 0; i < input.rows.length; i++) {
       const row = input.rows[i];
       try {
@@ -251,19 +257,24 @@ export class EntriesService {
           continue;
         }
         const level = this.normaliseLevel(row.level);
-        const entry = await this.prisma.progressEntry.create({
-          data: {
-            id: newProgressEntryId(),
-            projectId: input.project.id,
-            weekStartDate: week,
-            authorId: input.authorId,
-            title: row.title.trim(),
-            level,
-            summary: row.summary ?? null,
-            notes: row.notes ?? null,
-            status: row.status ?? 'pending',
-            revision: 1
-          }
+        const entry = await this.prisma.$transaction(async (tx) => {
+          const context = await this.history.begin(tx, input.project.id);
+          const imported = await tx.progressEntry.create({
+            data: {
+              id: newProgressEntryId(),
+              projectId: input.project.id,
+              weekStartDate: week,
+              authorId: input.authorId,
+              title: row.title.trim(),
+              level,
+              summary: row.summary ?? null,
+              notes: row.notes ?? null,
+              status: row.status ?? 'pending',
+              revision: 1
+            }
+          });
+          await this.history.record(tx, context, author, 'entry.imported', imported.id);
+          return imported;
         });
         created.push(entry);
       } catch (err) {
@@ -284,6 +295,11 @@ export class EntriesService {
       code: 'invalid_level',
       message: 'level must be primary|secondary|minor (or 1|2|3).'
     });
+  }
+
+  private assertDateRange(date: Date, start: string, end: string): void {
+    const value = date.toISOString().slice(0, 10);
+    if (value < start || value > end) throw new ConflictException({ code: 'week_out_of_range', message: 'weekStartDate must fall inside the current project date range.' });
   }
 
   /**

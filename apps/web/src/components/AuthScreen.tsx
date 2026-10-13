@@ -55,30 +55,24 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess, initialMode = 'l
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-50 relative overflow-hidden">
-      {/* Background Decor */}
-      <div className="absolute top-0 left-0 w-full h-full overflow-hidden pointer-events-none">
-        <div className="absolute -top-[20%] -left-[10%] w-[50%] h-[50%] bg-indigo-200/30 rounded-full blur-[100px]"></div>
-        <div className="absolute bottom-[0%] right-[0%] w-[40%] h-[40%] bg-emerald-200/30 rounded-full blur-[100px]"></div>
-      </div>
-
-      <div className="bg-white/80 backdrop-blur-xl p-6 sm:p-10 rounded-[2.5rem] shadow-2xl w-full max-w-md border border-white relative z-10 animate-in fade-in zoom-in-95 duration-300">
-        <div className="flex justify-end -mt-2 -mr-2 mb-2">
+    <div className="sp-auth-shell relative flex min-h-screen items-center justify-center px-5 py-10">
+      <div className="sp-auth-panel relative z-10 w-full max-w-[420px] rounded-2xl border p-6 backdrop-blur-2xl sm:p-9">
+        <div className="flex justify-end -mt-2 -mr-2 mb-3">
           <LanguageSwitcher compact />
         </div>
-        <div className="text-center mb-8">
-          <div className="w-16 h-16 bg-slate-900 text-white rounded-2xl flex items-center justify-center text-2xl mx-auto mb-4 shadow-lg shadow-slate-200">
+        <div className="text-center mb-7">
+          <div className="sp-brand-mark flex h-12 w-12 items-center justify-center rounded-2xl text-xl font-medium mx-auto mb-4" aria-hidden="true">
             S
           </div>
-          <h1 className="text-3xl font-black text-slate-800 tracking-tighter">SyncPath</h1>
-          <p className="text-slate-400 text-[10px] font-black uppercase tracking-[0.3em] mt-2">{t('Team Roadmap Platform')}</p>
+          <h1 className="sp-heading text-2xl font-semibold tracking-tight">SyncPath</h1>
+          <p className="sp-metadata mt-2 text-sm">{t('Team Roadmap Platform')}</p>
           {sharedAccess && <p className="mt-4 rounded-xl bg-indigo-50 px-4 py-3 text-sm leading-6 text-indigo-700">{t('Register or sign in to view shared content. You can view only.')}</p>}
         </div>
 
-        <form onSubmit={handleSubmit} className="space-y-6">
+        <form onSubmit={handleSubmit} className="space-y-4">
           {mode === 'signup' && (
             <div className="animate-in fade-in slide-in-from-top-2 duration-300">
-              <label htmlFor="auth-email" className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 ml-2">{t('Email')}</label>
+              <label htmlFor="auth-email" className="mb-2 block text-xs font-medium text-slate-600">{t('Email')}</label>
               <input
                 id="auth-email"
                 autoComplete="email"
@@ -86,13 +80,13 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess, initialMode = 'l
                 required
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
-                className="w-full px-6 py-4 bg-slate-50 border border-slate-100 rounded-2xl focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-50 outline-none font-bold text-slate-700 transition-all"
+                className="sp-auth-input h-11 w-full rounded-lg border px-3.5 text-sm outline-none transition-colors"
                 placeholder="you@example.com"
               />
             </div>
           )}
           <div>
-            <label htmlFor="auth-username" className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 ml-2">{t('Username')}</label>
+            <label htmlFor="auth-username" className="mb-2 block text-xs font-medium text-slate-600">{t('Username')}</label>
             <input
               id="auth-username"
               autoComplete="username"
@@ -100,12 +94,12 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess, initialMode = 'l
               required
               value={username}
               onChange={(e) => setUsername(e.target.value)}
-              className="w-full px-6 py-4 bg-slate-50 border border-slate-100 rounded-2xl focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-50 outline-none font-bold text-slate-700 transition-all"
+              className="sp-auth-input h-11 w-full rounded-lg border px-3.5 text-sm outline-none transition-colors"
               placeholder={t('Enter username')}
             />
           </div>
           <div>
-            <label htmlFor="auth-password" className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 ml-2">{t('Password')}</label>
+            <label htmlFor="auth-password" className="mb-2 block text-xs font-medium text-slate-600">{t('Password')}</label>
             <input
               id="auth-password"
               autoComplete={mode === 'signup' ? 'new-password' : 'current-password'}
@@ -114,14 +108,14 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess, initialMode = 'l
               minLength={8}
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              className="w-full px-6 py-4 bg-slate-50 border border-slate-100 rounded-2xl focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-50 outline-none font-bold text-slate-700 transition-all"
+              className="sp-auth-input h-11 w-full rounded-lg border px-3.5 text-sm outline-none transition-colors"
               placeholder={mode === 'signup' ? t('At least 8 characters') : t('Enter password')}
             />
           </div>
 
           {mode === 'signup' && (
             <div className="animate-in fade-in slide-in-from-top-2 duration-300">
-              <label htmlFor="auth-confirm-password" className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2 ml-2">{t('Confirm Password')}</label>
+              <label htmlFor="auth-confirm-password" className="mb-2 block text-xs font-medium text-slate-600">{t('Confirm Password')}</label>
               <input
                 id="auth-confirm-password"
                 autoComplete="new-password"
@@ -129,14 +123,14 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess, initialMode = 'l
                 required
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
-                className="w-full px-6 py-4 bg-slate-50 border border-slate-100 rounded-2xl focus:bg-white focus:border-indigo-500 focus:ring-4 focus:ring-indigo-50 outline-none font-bold text-slate-700 transition-all"
+                className="sp-auth-input h-11 w-full rounded-lg border px-3.5 text-sm outline-none transition-colors"
                 placeholder={t('Confirm password')}
               />
             </div>
           )}
 
           {error && (
-            <div className="p-3 bg-red-50 text-red-500 text-xs font-bold rounded-xl text-center border border-red-100">
+            <div role="alert" className="p-3 bg-red-50 text-red-600 text-xs leading-5 rounded-lg border border-red-100">
               {error}
             </div>
           )}
@@ -144,7 +138,7 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess, initialMode = 'l
           <button
             type="submit"
             disabled={submitting}
-            className="w-full py-4 bg-slate-900 text-white rounded-2xl font-black text-xs uppercase tracking-[0.2em] shadow-xl hover:scale-[1.02] active:scale-[0.98] transition-all disabled:opacity-60 disabled:hover:scale-100"
+            className="sp-button-primary min-h-11 w-full text-sm font-medium disabled:opacity-60"
           >
             {submitting
               ? t('Working…')
@@ -154,7 +148,7 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess, initialMode = 'l
           </button>
         </form>
 
-        <div className="mt-6 flex items-center justify-between">
+        <div className="mt-5 flex items-center justify-center">
           <button
             type="button"
             onClick={() => {
@@ -162,7 +156,7 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onAuthSuccess, initialMode = 'l
               setError('');
               setConfirmPassword('');
             }}
-            className="text-xs font-bold text-indigo-600 hover:text-indigo-800 transition-colors"
+            className="rounded-md px-2 py-1 text-xs font-medium text-slate-500 transition-colors hover:text-indigo-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
           >
             {mode === 'login' ? t('Need an account?') : t('Already have an account?')}
           </button>

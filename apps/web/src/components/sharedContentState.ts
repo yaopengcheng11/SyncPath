@@ -1,6 +1,39 @@
 import type { PublicEntry, PublicProject } from '@syncpath/api-client';
 import type { Project, WorkLog } from '../types';
 
+export type SharedContentSource =
+  | { kind: 'token'; token: string }
+  | { kind: 'receipt'; receiptId: string };
+
+export type ShareRoute =
+  | { kind: 'home' }
+  | { kind: 'received-list' }
+  | { kind: 'shared'; source: SharedContentSource };
+
+/** Hash routing keeps an external sharing token out of server access logs. */
+export function parseShareRoute(hash: string): ShareRoute {
+  if (hash === '#/received-shares' || hash === '#/received-shares/') return { kind: 'received-list' };
+  const routes = [
+    { prefix: '#/share/', kind: 'token' },
+    { prefix: '#/received-share/', kind: 'receipt' }
+  ] as const;
+  for (const route of routes) {
+    if (!hash.startsWith(route.prefix)) continue;
+    let value = hash.slice(route.prefix.length);
+    try { value = decodeURIComponent(value); } catch { value = ''; }
+    return { kind: 'shared', source: route.kind === 'token' ? { kind: 'token', token: value } : { kind: 'receipt', receiptId: value } };
+  }
+  return { kind: 'home' };
+}
+
+export function receivedShareHash(receiptId: string): string {
+  return `#/received-share/${encodeURIComponent(receiptId)}`;
+}
+
+export function sharedContentScope(userId: string, source: SharedContentSource): string {
+  return JSON.stringify([userId, source.kind, source.kind === 'token' ? source.token : source.receiptId]);
+}
+
 export function createShareUrl(token: string, base: string): string {
   const url = new URL(base);
   url.search = '';

@@ -3,6 +3,7 @@ import { formatDate, parseSafeDate } from '../utils/dateUtils';
 import { WorkLog, Project, LogLevel, Collaborator } from '../types';
 import html2canvas from 'html2canvas';
 import AppDialog from './AppDialog';
+import TimelineExportDialog from './TimelineExportDialog';
 import { useI18n } from '../i18n';
 import { planTimelineMoves, timelineContentSize, timelineDateAtPosition, timelineDatePosition, timelineDragDays, timelineFitScale } from './timelineGeometry';
 import { cardClipboard, type ClipboardCard } from '../utils/cardClipboard';
@@ -15,7 +16,7 @@ interface TimelineProps {
   onMoveLogs?: (moves: {id: string, oldDate: string, newDate: string}[]) => void;
   onCopyLogs?: (copies: {id: string, oldDate: string, newDate: string}[]) => void;
   onUpdateProject?: (updates: Partial<Project>) => void;
-  onDeleteLogs?: (logIds: string[]) => void;
+  onDeleteLogs?: (logIds: string[]) => Promise<void> | void;
   onToggleLock?: (logId: string, dateStr: string) => void;
   onPasteLogs?: (logs: ClipboardCard[], targetDate: string | null) => void;
   /** Undo the last card operation. Returns a description, or null if nothing to undo. */
@@ -83,6 +84,12 @@ const Timeline: React.FC<TimelineProps> = ({
   const [isExporting, setIsExporting] = useState(false);
   const [exportBg, setExportBg] = useState<'white' | 'transparent'>('white');
   const [exportError, setExportError] = useState<string | null>(null);
+  const exportInFlight = useRef(false);
+  const [pendingDeleteIds, setPendingDeleteIds] = useState<string[] | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const deleteInFlight = useRef(false);
+  const interactionSuspended = suspended || showProjectSettings || showExportModal || exportError !== null || pendingDeleteIds !== null;
 
   const [transform, setTransform] = useState({ x: 0, y: 0, scale: 1 });
   const [timelineScale, setTimelineScale] = useState(1); // New state for horizontal stretching
@@ -124,6 +131,43 @@ const Timeline: React.FC<TimelineProps> = ({
   const getPosFromDate = useCallback((dateStr: string) => {
     return timelineDatePosition(dateStr, project.startDate, project.endDate);
   }, [project.startDate, project.endDate]);
+
+  useEffect(() => {
+    if (!interactionSuspended) return;
+    setIsSpacePressed(false);
+    setIsPanning(false);
+    setDraggingLog(null);
+    setDragStartPos(null);
+    setHasMovedEnough(false);
+    setDragGhostPos(null);
+    setDragCurrentDate(null);
+    setSelectionBox(null);
+    setShowLevelMenu(false);
+  }, [interactionSuspended]);
+
+  const cancelDelete = useCallback(() => {
+    if (deleteInFlight.current) return;
+    setPendingDeleteIds(null);
+    setDeleteError(null);
+  }, []);
+
+  const confirmDelete = useCallback(async () => {
+    if (!pendingDeleteIds || !onDeleteLogs || deleteInFlight.current) return;
+    const ids = [...pendingDeleteIds];
+    deleteInFlight.current = true;
+    setIsDeleting(true);
+    setDeleteError(null);
+    try {
+      await onDeleteLogs(ids);
+      setSelectedLogIds(previous => new Set(Array.from(previous).filter(id => !ids.includes(id))));
+      setPendingDeleteIds(null);
+    } catch (error) {
+      setDeleteError(error instanceof Error ? error.message : t('Unable to delete entry'));
+    } finally {
+      deleteInFlight.current = false;
+      setIsDeleting(false);
+    }
+  }, [onDeleteLogs, pendingDeleteIds, t]);
 
   // Handle Selection Presence Broadcast
   useEffect(() => {
@@ -247,7 +291,7 @@ const Timeline: React.FC<TimelineProps> = ({
   }, []);
 
   const moveSelectedLogsByDays = useCallback((days: number): void => {
-    if (readOnly || !onMoveLogs || selectedLogIds.size === 0) return;
+    if (readOnly || interactionSuspended || !onMoveLogs || selectedLogIds.size === 0) return;
     const items = Object.entries(logs).flatMap(([date, list]) => list
       .filter(log => selectedLogIds.has(log.id))
       .map(log => ({ id: log.id, date, locked: !!log.isLocked || lockedLevels[log.level] })));
@@ -255,7 +299,7 @@ const Timeline: React.FC<TimelineProps> = ({
     if (moves.length > 0) {
       onMoveLogs(moves);
     }
-  }, [logs, lockedLevels, onMoveLogs, project.endDate, project.startDate, readOnly, selectedLogIds]);
+  }, [logs, lockedLevels, onMoveLogs, project.endDate, project.startDate, readOnly, interactionSuspended, selectedLogIds]);
 
   useEffect(() => {
     if (autoScale || !mounted.current) {
@@ -269,7 +313,7 @@ const Timeline: React.FC<TimelineProps> = ({
 
   useEffect(() => {
     const handleKeyDown = async (e: KeyboardEvent) => {
-      if (suspended || showProjectSettings || showExportModal || exportError) return;
+      if (interactionSuspended) return;
       if (!containerRef.current?.contains(document.activeElement)) return;
       const activeTag = document.activeElement?.tagName;
       if (activeTag === 'INPUT' || activeTag === 'TEXTAREA' || activeTag === 'SELECT' || activeTag === 'BUTTON' || (document.activeElement as HTMLElement)?.isContentEditable) return;
@@ -317,12 +361,11 @@ const Timeline: React.FC<TimelineProps> = ({
                 }
             });
 
-            // No confirmation step: the delete is recorded on the undo stack,
-            // so Ctrl+Z brings the cards back.
             if (idsToDelete.length > 0) {
-                onDeleteLogs(idsToDelete);
-                setSelectedLogIds(new Set<string>());
+                setDeleteError(null);
+                setPendingDeleteIds(idsToDelete);
             }
+            return;
         }
       }
 
@@ -389,7 +432,7 @@ const Timeline: React.FC<TimelineProps> = ({
     window.addEventListener('keyup', handleKeyUp);
     window.addEventListener('blur', handleBlur);
     return () => { window.removeEventListener('keydown', handleKeyDown); window.removeEventListener('keyup', handleKeyUp); window.removeEventListener('blur', handleBlur); };
-  }, [logs, logMarkers, onDeleteLogs, lockedLevels, selectedLogIds, readOnly, suspended, showProjectSettings, showExportModal, exportError, fitToView, handleZoomIn, handleZoomOut, moveSelectedLogsByDays, onPasteLogs, onUndo, selectedDate, toggleCollapsedLogs, t]);
+  }, [logs, logMarkers, onDeleteLogs, lockedLevels, selectedLogIds, readOnly, interactionSuspended, fitToView, handleZoomIn, handleZoomOut, moveSelectedLogsByDays, onPasteLogs, onUndo, selectedDate, toggleCollapsedLogs, t]);
 
   useEffect(() => {
     // Paste is handled on Ctrl+V in the keydown effect above, reading the
@@ -409,7 +452,7 @@ const Timeline: React.FC<TimelineProps> = ({
   }, [projectStart, totalDurationMs, now, getPosFromDate]);
 
   const handleContainerMouseDown = useCallback((e: React.MouseEvent) => {
-    if (suspended || showProjectSettings || showExportModal || exportError || (e.target as HTMLElement).closest('button, input, textarea, select, [role="dialog"]')) return;
+    if (interactionSuspended || (e.target as HTMLElement).closest('button, input, textarea, select, [role="dialog"]')) return;
     containerRef.current?.focus();
     if (isSpacePressed) {
        setIsPanning(true);
@@ -421,12 +464,13 @@ const Timeline: React.FC<TimelineProps> = ({
       setSelectionBox({ startX: e.clientX, startY: e.clientY, currentX: e.clientX, currentY: e.clientY });
       setSelectedDate(null); setSelectedPercentage(null);
     }
-  }, [isSpacePressed, readOnly, draggingLog, suspended, showProjectSettings, showExportModal, exportError]);
+  }, [isSpacePressed, readOnly, draggingLog, interactionSuspended]);
 
   const handleLogMouseDown = useCallback((e: React.MouseEvent, log: WorkLog, dateStr: string) => {
     e.stopPropagation(); 
+    if (interactionSuspended) return;
     containerRef.current?.focus();
-    if (readOnly || suspended) return;
+    if (readOnly) return;
     if (isSpacePressed) {
       setIsPanning(true);
       lastMousePos.current = { x: e.clientX, y: e.clientY };
@@ -451,9 +495,10 @@ const Timeline: React.FC<TimelineProps> = ({
          if (onInteraction) onInteraction('Editing', log.id);
       }
     }
-  }, [readOnly, suspended, isSpacePressed, selectedLogIds, lockedLevels, onInteraction, onMoveLogs, onCopyLogs]);
+  }, [readOnly, interactionSuspended, isSpacePressed, selectedLogIds, lockedLevels, onInteraction, onMoveLogs, onCopyLogs]);
 
   const handleGlobalMouseMove = useCallback((e: MouseEvent) => {
+    if (interactionSuspended) return;
     if (isPanning) {
       const dx = e.clientX - lastMousePos.current.x;
       const dy = e.clientY - lastMousePos.current.y;
@@ -497,9 +542,10 @@ const Timeline: React.FC<TimelineProps> = ({
         setDragCurrentDate(displayDate);
       }
     }
-  }, [isPanning, draggingLog, dragStartPos, hasMovedEnough, readOnly, project.startDate, project.endDate, selectionBox, selectedLogIds, logs, lockedLevels, getPosFromDate]);
+  }, [isPanning, draggingLog, dragStartPos, hasMovedEnough, readOnly, interactionSuspended, project.startDate, project.endDate, selectionBox, selectedLogIds, logs, lockedLevels, getPosFromDate]);
 
   const handleGlobalMouseUp = useCallback((e: MouseEvent) => {
+    if (interactionSuspended) return;
     if (isPanning) { setIsPanning(false); return; }
     if (selectionBox) {
       const dist = Math.abs(selectionBox.currentX - selectionBox.startX) + Math.abs(selectionBox.currentY - selectionBox.startY);
@@ -532,7 +578,7 @@ const Timeline: React.FC<TimelineProps> = ({
       setTimeout(() => { ignoreClickRef.current = false; }, 100);
     }
     setDraggingLog(null); setDragStartPos(null); setHasMovedEnough(false); setDragGhostPos(null); setDragCurrentDate(null);
-  }, [draggingLog, dragStartPos, hasMovedEnough, lockedLevels, onMoveLogs, onCopyLogs, project.startDate, project.endDate, readOnly, isPanning, selectionBox, selectedLogIds, logs, onInteraction]);
+  }, [draggingLog, dragStartPos, hasMovedEnough, lockedLevels, onMoveLogs, onCopyLogs, project.startDate, project.endDate, readOnly, interactionSuspended, isPanning, selectionBox, selectedLogIds, logs, onInteraction]);
 
   useEffect(() => {
     if (draggingLog || isPanning || selectionBox) {
@@ -547,7 +593,7 @@ const Timeline: React.FC<TimelineProps> = ({
 
   const handleAxisClick = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
-    if (readOnly) return;
+    if (readOnly || interactionSuspended) return;
     if (isPanning || draggingLog || selectionBox || !lineRef.current) return;
     const rect = lineRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left;
@@ -556,10 +602,10 @@ const Timeline: React.FC<TimelineProps> = ({
     setSelectedDate(dateStr);
     setSelectedPercentage(percentage * 100);
     setShowLevelMenu(false);
-  }, [isPanning, draggingLog, selectionBox, project.startDate, project.endDate, readOnly]);
+  }, [isPanning, draggingLog, selectionBox, project.startDate, project.endDate, readOnly, interactionSuspended]);
 
   const handleAxisMouseMove = useCallback((e: React.MouseEvent) => {
-    if (readOnly || isPanning || draggingLog || selectionBox || !lineRef.current) return;
+    if (readOnly || interactionSuspended || isPanning || draggingLog || selectionBox || !lineRef.current) return;
     const rect = lineRef.current.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const percentage = Math.max(0, Math.min(1, x / rect.width));
@@ -570,14 +616,14 @@ const Timeline: React.FC<TimelineProps> = ({
         tooltipRef.current.style.left = `${percentage * 100}%`;
         tooltipTextRef.current.innerText = displayDate;
     }
-  }, [readOnly, isPanning, draggingLog, selectionBox, project.startDate, project.endDate]);
+  }, [readOnly, interactionSuspended, isPanning, draggingLog, selectionBox, project.startDate, project.endDate]);
 
   const handleAxisMouseLeave = useCallback(() => {
     if (tooltipRef.current) { tooltipRef.current.style.opacity = '0'; }
   }, []);
 
   const handleWheel = (e: React.WheelEvent) => {
-    if (!isSpacePressed) return; 
+    if (interactionSuspended || !isSpacePressed) return;
     const zoomIntensity = 0.05;
     const delta = e.deltaY > 0 ? -zoomIntensity : zoomIntensity;
     setTransform(prev => {
@@ -587,9 +633,10 @@ const Timeline: React.FC<TimelineProps> = ({
   };
 
   const executeExport = useCallback(async () => {
-    if (!captureRef.current) return;
-    setShowExportModal(false);
+    if (!captureRef.current || exportInFlight.current) return;
+    exportInFlight.current = true;
     setIsExporting(true);
+    setExportError(null);
     try {
       await new Promise(resolve => setTimeout(resolve, 100));
       const EXPORT_WIDTH = 1920; 
@@ -599,13 +646,23 @@ const Timeline: React.FC<TimelineProps> = ({
           backgroundColor: withAlpha ? null : '#ffffff',
           scale: 2, logging: false, useCORS: true, windowWidth: EXPORT_WIDTH, 
           onclone: (clonedDoc) => {
+            // White exports use the light palette in the clone so axis labels
+            // remain readable. The user's live theme is never changed.
+            if (!withAlpha) {
+              clonedDoc.documentElement.dataset.theme = 'light';
+              clonedDoc.documentElement.classList.remove('dark');
+              clonedDoc.documentElement.style.colorScheme = 'light';
+            }
             const wrapper = clonedDoc.querySelector('[data-capture-wrapper]') as HTMLElement;
             const inner = clonedDoc.querySelector('[data-inner-container]') as HTMLElement;
             if (wrapper && inner) {
                wrapper.style.width = `${EXPORT_WIDTH}px`; wrapper.style.height = 'auto'; wrapper.style.overflow = 'visible';
+               const background = withAlpha ? 'transparent' : '#ffffff';
+               wrapper.style.background = background;
+               inner.style.background = background;
                if (withAlpha) {
-                 wrapper.style.backgroundColor = 'transparent'; wrapper.style.background = 'transparent'; wrapper.classList.remove('bg-slate-50/10');
-                 inner.style.backgroundColor = 'transparent'; inner.style.background = 'transparent'; inner.classList.remove('bg-white');
+                 wrapper.classList.remove('bg-slate-50/10');
+                 inner.classList.remove('bg-white');
                }
                inner.style.transform = 'none'; inner.style.width = '100%'; inner.style.height = 'auto'; inner.style.position = 'relative'; 
             }
@@ -615,14 +672,29 @@ const Timeline: React.FC<TimelineProps> = ({
             cards.forEach((el) => { (el as HTMLElement).style.overflow = 'visible'; });
           }
         });
+        const image = await new Promise<Blob>((resolve, reject) => {
+          canvas.toBlob(blob => {
+            if (blob) resolve(blob);
+            else reject(new Error(t('Failed to generate export. Please try again.')));
+          }, 'image/png');
+        });
+        const imageUrl = URL.createObjectURL(image);
         const link = document.createElement('a');
-        link.download = `${project.name.replace(/\s+/g, '-').toLowerCase()}-snapshot.png`;
-        link.href = canvas.toDataURL('image/png');
-        link.click();
+        try {
+          link.download = `${project.name.replace(/\s+/g, '-').toLowerCase()}-snapshot.png`;
+          link.href = imageUrl;
+          document.body.appendChild(link);
+          link.click();
+          setShowExportModal(false);
+        } finally {
+          link.remove();
+          const revoke = URL.revokeObjectURL.bind(URL);
+          window.setTimeout(() => revoke(imageUrl), 1000);
+        }
     } catch (error) {
-      setExportError(error instanceof Error ? error.message : 'Failed to generate export. Please try again.');
-    } finally { setIsExporting(false); }
-  }, [project.name, exportBg]);
+      setExportError(error instanceof Error ? error.message : t('Failed to generate export. Please try again.'));
+    } finally { exportInFlight.current = false; setIsExporting(false); }
+  }, [project.name, exportBg, t]);
 
   // Dynamic Scale Markers based on Timeline Scale
   const timeScaleMarkers = useMemo(() => {
@@ -693,10 +765,10 @@ const Timeline: React.FC<TimelineProps> = ({
     <div 
       ref={containerRef}
       tabIndex={0}
-      className={`w-full flex flex-col overflow-hidden bg-white relative transition-all select-none outline-none ${className || 'flex-1'} ${isPanning ? 'cursor-grabbing' : isSpacePressed ? 'cursor-grab' : ''}`}
+      className={`sp-timeline-shell w-full flex flex-col overflow-hidden bg-white relative transition-all select-none outline-none ${className || 'flex-1'} ${isPanning ? 'cursor-grabbing' : isSpacePressed ? 'cursor-grab' : ''}`}
       onMouseDown={handleContainerMouseDown}
       onClick={() => { 
-        if (suspended || showProjectSettings || showExportModal || exportError) return;
+        if (interactionSuspended) return;
         if (ignoreClickRef.current) { ignoreClickRef.current = false; return; }
         if(!readOnly && !selectionBox) { setSelectedDate(null); setSelectedPercentage(null); setSelectedLogIds(new Set<string>()); } 
       }}
@@ -726,33 +798,40 @@ const Timeline: React.FC<TimelineProps> = ({
         </div>
       )}
 
-      {showExportModal && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-md z-[2000] flex items-center justify-center p-6 animate-in fade-in duration-200" onClick={(e) => e.stopPropagation()}>
-          <div className="bg-white w-full max-w-sm rounded-[2rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 p-8 text-center" onClick={(e) => e.stopPropagation()}>
-            <div className="w-16 h-16 bg-emerald-50 text-emerald-500 rounded-2xl flex items-center justify-center text-2xl mx-auto mb-6"><i className="fas fa-camera"></i></div>
-            <h3 className="text-xl font-black text-slate-800 tracking-tight mb-2">{t('Export Snapshot')}</h3>
-            <p className="text-xs text-slate-500 font-medium mb-8 leading-relaxed">{t('Customize your export.')}</p>
-            <div className="space-y-6 text-left">
-              <div><label className="block text-[9px] font-black text-slate-400 uppercase tracking-widest mb-3">{t('Background')}</label><div className="grid grid-cols-2 gap-3"><button onClick={() => setExportBg('white')} className={`py-3 rounded-xl text-[10px] font-black uppercase tracking-widest border-2 transition-all flex items-center justify-center gap-2 ${exportBg === 'white' ? 'border-slate-800 text-slate-800 bg-slate-50' : 'border-slate-100 text-slate-400 hover:border-slate-200'}`}><div className="w-3 h-3 bg-white border border-slate-200 rounded-full"></div> {t('Standard')}</button><button onClick={() => setExportBg('transparent')} className={`py-3 rounded-xl text-[10px] font-black uppercase tracking-widest border-2 transition-all flex items-center justify-center gap-2 ${exportBg === 'transparent' ? 'border-slate-800 text-slate-800 bg-slate-50' : 'border-slate-100 text-slate-400 hover:border-slate-200'}`}><div className="w-3 h-3 bg-white border border-slate-200 rounded-full relative overflow-hidden"><div className="absolute inset-0 bg-[url('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAYAAACp8Z5+AAAAIklEQVQIW2NkQAKrVq36zwjjgzhhZWGMYAEYB8RmROaABADeOQ8CXl/xfgAAAABJRU5ErkJggg==')] opacity-30"></div></div> {t('Alpha')}</button></div></div>
-            </div>
-            <button onClick={executeExport} className="w-full py-4 bg-slate-900 text-white rounded-xl text-[10px] font-black uppercase tracking-[0.2em] hover:bg-slate-800 transition-colors shadow-lg mt-8">{t('Download PNG')}</button>
-            <button onClick={() => setShowExportModal(false)} className="mt-6 text-[10px] font-black text-slate-400 uppercase tracking-widest hover:text-slate-600">{t('Cancel')}</button>
-          </div>
-        </div>
-      )}
+      {showExportModal && <TimelineExportDialog
+        open={showExportModal}
+        project={project}
+        logs={logs}
+        visibleLevels={visibleLevels}
+        background={exportBg}
+        onBackgroundChange={setExportBg}
+        exporting={isExporting}
+        error={exportError ?? undefined}
+        onExportPng={executeExport}
+        onClose={() => {
+          if (exportInFlight.current) return;
+          setShowExportModal(false);
+          setExportError(null);
+        }}
+      />}
 
       <AppDialog
-        open={exportError !== null}
+        open={pendingDeleteIds !== null}
         tone="danger"
-        title={t('Export failed')}
-        message={exportError ?? ''}
-        cancelLabel={t('Close')}
-        onCancel={() => setExportError(null)}
+        title={t('Delete cards?')}
+        message={t('Delete {{count}} selected cards? This cannot be undone.', { count: pendingDeleteIds?.length ?? 0 })}
+        error={deleteError ?? undefined}
+        confirmLabel={t(isDeleting ? 'Deleting…' : deleteError ? 'Retry' : 'Delete')}
+        cancelLabel={t('Cancel')}
+        confirmDisabled={isDeleting}
+        cancelDisabled={isDeleting}
+        onConfirm={confirmDelete}
+        onCancel={cancelDelete}
       />
 
       <div className="absolute top-6 left-6 right-6 z-50 flex flex-wrap gap-2" onMouseDown={e => e.stopPropagation()} onClick={e => e.stopPropagation()}>
         {levelOptions.map(opt => (
-          <div key={opt.level} className="flex items-center bg-white rounded-2xl border border-slate-100 shadow-xl overflow-hidden transition-all">
+          <div key={opt.level} className="sp-popover flex items-center bg-white rounded-xl border border-slate-100 shadow-sm overflow-hidden transition-all">
             <button aria-pressed={visibleLevels[opt.level]} onClick={(e) => { e.stopPropagation(); setVisibleLevels(p => ({...p, [opt.level]: !p[opt.level]})); }} className={`flex items-center gap-2 px-3 py-2.5 transition-all ${visibleLevels[opt.level] ? 'opacity-100' : 'opacity-40 grayscale'}`}><div className={`w-2.5 h-2.5 rounded-full ${opt.color}`}></div><span className="text-xs font-bold text-slate-800">{opt.label}</span></button>
             {!readOnly && onMoveLogs && <button aria-label={t(lockedLevels[opt.level] ? 'Unlock level' : 'Lock level')} title={t(lockedLevels[opt.level] ? 'Unlock level' : 'Lock level')} aria-pressed={lockedLevels[opt.level]} onClick={(e) => { e.stopPropagation(); setLockedLevels(p => ({...p, [opt.level]: !p[opt.level]})); }} className={`px-3 py-2.5 border-l border-slate-50 ${lockedLevels[opt.level] ? 'text-indigo-600 bg-indigo-50' : 'text-slate-300'}`}><i className={`fas ${lockedLevels[opt.level] ? 'fa-lock' : 'fa-lock-open'} text-[10px]`}></i></button>}
           </div>
@@ -776,8 +855,7 @@ const Timeline: React.FC<TimelineProps> = ({
                   <div className="flex flex-col-reverse items-center pointer-events-auto">
                     {marker.logList.map((log: WorkLog, logIdx: number) => {
                       const isSelected = selectedLogIds.has(log.id);
-                      const isPast = marker.isPast;
-                      const isLocked = !!log.isLocked || lockedLevels[log.level];
+                                            const isLocked = !!log.isLocked || lockedLevels[log.level];
                       const isDraggingThis = draggingLog?.id === log.id;
                       
                       // COLLABORATOR VISUALIZATION LOGIC
@@ -794,7 +872,7 @@ const Timeline: React.FC<TimelineProps> = ({
                       const cardDateLabel = parseSafeDate(marker.dateStr).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 
                       return (
-                        <div key={log.id} data-log-id={log.id} onClick={(e) => e.stopPropagation()} onMouseDown={(e) => handleLogMouseDown(e, log, marker.dateStr)} onMouseEnter={() => setHoveredLogId(log.id)} onMouseLeave={() => setHoveredLogId(null)} onDoubleClick={(e) => { e.stopPropagation(); onSelectDate(marker.dateStr, log.id); }} title={isCollapsed ? `${log.author} · ${cardDateLabel}${log.summary ? ` · ${log.summary}` : ''}` : undefined} style={{ marginBottom: logIdx === 0 ? '8px' : '-24px', zIndex: isDraggingThis || isBeingEdited ? 2000 : (100 - logIdx), transform: isDraggingThis ? 'scale(1.03) translateY(-4px)' : isSelected ? 'scale(1.03) translateY(-4px)' : 'none' }} className={`border rounded-xl shadow-sm transition-all relative overflow-visible group select-none ${isLocked || readOnly ? (readOnly ? 'cursor-pointer' : 'grayscale-[0.6] cursor-not-allowed') : draggingLog?.isCloning ? 'cursor-copy' : 'cursor-grab active:cursor-grabbing'} ${isPast && !isSelected ? 'grayscale-[0.5] opacity-75' : 'opacity-100 grayscale-0'} ${isCollapsed ? 'w-16 p-1.5' : `p-2.5 ${log.level === 1 ? 'w-52' : log.level === 2 ? 'w-48' : 'w-44'}`} ${isSelected ? 'ring-2 ring-indigo-500/50 border-indigo-600 bg-indigo-50' : log.level === 1 ? 'bg-slate-900 border-slate-900 text-white' : log.level === 2 ? 'bg-indigo-50 border-indigo-200' : 'bg-slate-50 border-slate-200'} ${isBeingEdited ? 'ring-4 ring-offset-2 ring-amber-400 border-amber-400' : ''}`}>
+                        <div key={log.id} data-log-id={log.id} data-level={log.level} data-selected={isSelected} onClick={(e) => e.stopPropagation()} onMouseDown={(e) => handleLogMouseDown(e, log, marker.dateStr)} onMouseEnter={() => setHoveredLogId(log.id)} onMouseLeave={() => setHoveredLogId(null)} onDoubleClick={(e) => { e.stopPropagation(); onSelectDate(marker.dateStr, log.id); }} title={isCollapsed ? `${log.author} · ${cardDateLabel}${log.summary ? ` · ${log.summary}` : ''}` : undefined} style={{ marginBottom: logIdx === 0 ? '8px' : '-24px', zIndex: isDraggingThis || isBeingEdited ? 2000 : (100 - logIdx), transform: isDraggingThis ? 'scale(1.03) translateY(-4px)' : isSelected ? 'scale(1.03) translateY(-4px)' : 'none' }} className={`sp-timeline-card border rounded-xl shadow-sm transition-all relative overflow-visible group select-none ${isLocked || readOnly ? (readOnly ? 'cursor-pointer' : 'grayscale-[0.6] cursor-not-allowed') : draggingLog?.isCloning ? 'cursor-copy' : 'cursor-grab active:cursor-grabbing'} opacity-100 ${isCollapsed ? 'w-16 p-1.5' : `p-2.5 ${log.level === 1 ? 'w-52' : log.level === 2 ? 'w-48' : 'w-44'}`} ${isSelected ? 'ring-2 ring-indigo-500/50 border-indigo-600 bg-indigo-50' : log.level === 1 ? 'bg-slate-900 border-slate-900 text-white' : log.level === 2 ? 'bg-indigo-50 border-indigo-200' : 'bg-slate-50 border-slate-200'} ${isBeingEdited ? 'ring-4 ring-offset-2 ring-amber-400 border-amber-400' : ''}`}>
                           
                           {/* EDITING LABEL */}
                           {isBeingEdited && (
@@ -836,16 +914,16 @@ const Timeline: React.FC<TimelineProps> = ({
                             <div className={`w-6 h-6 mx-auto rounded-full flex items-center justify-center text-[11px] font-black flex-shrink-0 ${isSelected ? 'bg-indigo-600 text-white' : log.level === 1 ? 'bg-amber-400 text-slate-900' : log.level === 2 ? 'bg-indigo-500 text-white' : 'bg-slate-300 text-slate-700'}`}>{log.author.trim().charAt(0).toUpperCase() || '?'}</div>
                           ) : (
                             <>
-                              <div className="flex items-center gap-2 mb-1 overflow-hidden"><div className={`w-2 h-2 rounded-full flex-shrink-0 ${log.level === 1 ? 'bg-amber-400' : log.level === 2 ? 'bg-indigo-500' : 'bg-slate-300'}`}></div><span className={`text-sm font-bold leading-snug line-clamp-2 tracking-tight mt-[1px] ${isSelected ? 'text-indigo-900' : log.level === 1 ? 'text-amber-100' : log.level === 2 ? 'text-indigo-900' : 'text-slate-800'}`}>{log.author}</span></div>
-                              <div className={`text-xs font-medium opacity-70 mb-1.5 flex items-center gap-1 ${log.level === 1 && !isSelected ? 'text-amber-200' : 'text-slate-500'}`}><i className="far fa-calendar text-[7px]"></i>{cardDateLabel}</div>
-                              <p className={`text-xs line-clamp-2 leading-relaxed ${isSelected ? 'text-indigo-800' : log.level === 1 ? 'text-slate-300' : 'text-slate-500'}`}>{log.summary || t('Pending update...')}</p>
+                              <div className="flex items-center gap-2 mb-1 overflow-hidden"><div className={`w-2 h-2 rounded-full flex-shrink-0 ${log.level === 1 ? 'bg-amber-400' : log.level === 2 ? 'bg-indigo-500' : 'bg-slate-300'}`}></div><span className={`sp-card-title text-sm font-bold leading-snug line-clamp-2 tracking-tight mt-[1px] ${isSelected ? 'text-indigo-900' : log.level === 1 ? 'text-amber-100' : log.level === 2 ? 'text-indigo-900' : 'text-slate-800'}`}>{log.author}</span></div>
+                              <div className={`sp-card-date text-xs font-medium mb-1.5 flex items-center gap-1 ${log.level === 1 && !isSelected ? 'text-amber-200' : 'text-slate-500'}`}><i className="far fa-calendar text-[7px]"></i>{cardDateLabel}</div>
+                              <p className={`sp-card-summary text-xs line-clamp-2 leading-relaxed ${isSelected ? 'text-indigo-800' : log.level === 1 ? 'text-slate-300' : 'text-slate-500'}`}>{log.summary || t('Pending update...')}</p>
                             </>
                           )}
                         </div>
                       );
                     })}
                   </div>
-                  <div className={`w-0.5 bg-gradient-to-t transition-all duration-700 ${marker.isPast ? 'opacity-30' : 'opacity-100'}`} style={{ height: `${marker.baseStemHeight}px`, background: `linear-gradient(to top, #f1f5f9, ${marker.logList[0]?.level === 1 ? '#fbbf24' : marker.logList[0]?.level === 2 ? '#6366f1' : '#94a3b8'})` }}></div>
+                  <div className={`w-0.5 bg-gradient-to-t transition-all duration-700 ${marker.isPast ? 'opacity-30' : 'opacity-100'}`} style={{ height: `${marker.baseStemHeight}px`, background: `linear-gradient(to top, var(--timeline-stem-base, #f1f5f9), ${marker.logList[0]?.level === 1 ? 'var(--sp-milestone, #fbbf24)' : marker.logList[0]?.level === 2 ? 'var(--timeline-phase-color, #6366f1)' : 'var(--timeline-detail-color, #94a3b8)'})` }}></div>
                 </div>
               );})}
             </div>
@@ -856,10 +934,10 @@ const Timeline: React.FC<TimelineProps> = ({
                 {timeScaleMarkers.map((m, idx) => (
                    <div key={`${m.type}-${idx}`} className="absolute flex flex-col items-center" style={{ left: `${m.pos}%`, transform: 'translateX(-50%)' }}>
                       <div className={`w-px ${m.type === 'month' ? 'h-8 bg-slate-300' : m.type === 'week' ? 'h-5 bg-slate-200' : 'h-3 bg-slate-100'} mb-2`}></div>
-                      <span className={`${m.type === 'month' ? 'text-[11px] text-slate-600' : 'text-[9px] text-slate-400'} font-black uppercase tracking-widest whitespace-nowrap px-1`}>
+                      <span className={`${m.type === 'month' ? 'text-xs text-slate-600' : 'text-[11px] text-slate-500'} font-medium whitespace-nowrap px-1`}>
                         {m.label}
                       </span>
-                      {m.subLabel && <span className="text-[7px] text-slate-300 font-bold uppercase tracking-wide">{m.subLabel}</span>}
+                      {m.subLabel && <span className="text-[10px] text-slate-500 font-normal">{m.subLabel}</span>}
                    </div>
                 ))}
               </div>
@@ -870,7 +948,7 @@ const Timeline: React.FC<TimelineProps> = ({
                 onClick={handleAxisClick}
                 onDoubleClick={(event) => {
                   event.stopPropagation();
-                  if (readOnly || suspended || !lineRef.current) return;
+                  if (readOnly || interactionSuspended || !lineRef.current) return;
                   const rect = lineRef.current.getBoundingClientRect();
                   const date = timelineDateAtPosition((event.clientX - rect.left) / rect.width, project.startDate, project.endDate);
                   onSelectDate(date, undefined, 3);
@@ -883,7 +961,7 @@ const Timeline: React.FC<TimelineProps> = ({
                 {/* 1. Base Solid Line (The main timeline) */}
                 <div 
                   className="absolute top-1/2 left-0 right-0 h-[5px] -translate-y-1/2 rounded-full"
-                  style={{ background: `linear-gradient(to right, #e2e8f0 0%, #e2e8f0 ${todayPos}%, #94a3b8 ${todayPos}%, #94a3b8 100%)` }}
+                  style={{ background: `linear-gradient(to right, var(--timeline-track-past, #e2e8f0) 0%, var(--timeline-track-past, #e2e8f0) ${todayPos}%, var(--timeline-track-future, #94a3b8) ${todayPos}%, var(--timeline-track-future, #94a3b8) 100%)` }}
                 ></div>
 
                 {/* Ghost & Real-time Feedback */}
@@ -908,29 +986,29 @@ const Timeline: React.FC<TimelineProps> = ({
                 {!readOnly && selectedPercentage !== null && (
                   <div className="absolute top-1/2 -translate-y-1/2 z-40" style={{ left: `${selectedPercentage}%` }} onClick={e => e.stopPropagation()} onMouseDown={e => e.stopPropagation()}>
                     <button onClick={() => setShowLevelMenu(true)} className="w-10 h-10 bg-indigo-600 text-white rounded-xl flex items-center justify-center shadow-xl transform -translate-x-1/2 -translate-y-16 border-2 border-white"><i className="fas fa-plus"></i></button>
-                    {showLevelMenu && (<div className="absolute -translate-x-1/2 -translate-y-[260px] bg-white border border-slate-100 shadow-2xl rounded-2xl p-2 flex flex-col gap-1 min-w-[160px]">{levelOptions.map(opt => (<button key={opt.level} onClick={() => onSelectDate(selectedDate!, undefined, opt.level)} className="flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-slate-50"><div className={`w-3 h-3 rounded-full ${opt.color}`}></div><span className="text-[10px] font-black text-slate-800 uppercase">{opt.label}</span></button>))}</div>)}
+                    {showLevelMenu && (<div className="sp-popover absolute -translate-x-1/2 -translate-y-[260px] bg-white border border-slate-100 shadow-2xl rounded-2xl p-2 flex flex-col gap-1 min-w-[160px]">{levelOptions.map(opt => (<button key={opt.level} onClick={() => onSelectDate(selectedDate!, undefined, opt.level)} className="flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-slate-50"><div className={`w-3 h-3 rounded-full ${opt.color}`}></div><span className="text-xs font-semibold text-slate-800">{opt.label}</span></button>))}</div>)}
                   </div>
                 )}
               </div>
-              <div className="mt-10 flex justify-between text-[11px] font-black text-slate-400 uppercase tracking-widest px-2"><span>{projectStart.toLocaleDateString()}</span><span>{projectEnd.toLocaleDateString()}</span></div>
+              <div className="mt-10 flex justify-between text-xs font-medium text-slate-500 px-2"><span>{projectStart.toLocaleDateString()}</span><span>{projectEnd.toLocaleDateString()}</span></div>
             </div>
           </div>
         </div>
       </div>
 
       {!autoScale && (
-      <footer className="px-6 py-4 bg-slate-50 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3 z-10" onMouseDown={e => e.stopPropagation()} onClick={e => e.stopPropagation()}>
+      <footer className="sp-timeline-toolbar px-6 py-4 bg-slate-50 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3 z-10" onMouseDown={e => e.stopPropagation()} onClick={e => e.stopPropagation()}>
         <p className="text-xs text-slate-500">{t(readOnly ? 'Double-click to view · Space to pan' : logMarkers.length === 0 ? 'Double-click the timeline to add your first card' : 'Drag to move · Double-click to edit · Space to pan')}</p>
-        <div className="flex items-center gap-4">
-          <span className="text-[9px] font-black text-slate-300 uppercase tracking-widest flex items-center gap-1.5" title={t('Collapse / expand cards')}><kbd className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-400 border border-slate-200">E</kbd> {t('Collapse / expand cards')}</span>
-          <button onClick={() => setShowExportModal(true)} disabled={isExporting} className="text-[9px] font-black text-emerald-600 uppercase tracking-widest border border-slate-200 px-4 py-2 rounded-full bg-white shadow-sm flex items-center gap-2 hover:bg-emerald-50 transition-colors disabled:opacity-50"><i className={`fas ${isExporting ? 'fa-spinner fa-spin' : 'fa-camera'}`}></i> { isExporting ? t('Processing...') : t('Snapshot') }</button>
-          {!readOnly && onUpdateProject && (<button onClick={(e) => { e.stopPropagation(); setShowProjectSettings(true); }} className="text-[9px] font-black text-slate-600 uppercase tracking-widest border border-slate-200 px-4 py-2 rounded-full bg-white shadow-sm flex items-center gap-2 hover:bg-slate-50 transition-colors"><i className="fas fa-sliders-h"></i> {t('Settings')}</button>)}
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs font-medium text-slate-500 flex items-center gap-1.5" title={t('Collapse / expand cards')}><kbd className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-400 border border-slate-200">E</kbd> {t('Collapse / expand cards')}</span>
+          <button onClick={() => { setExportError(null); setShowExportModal(true); }} disabled={isExporting} className="sp-button-secondary text-sm font-semibold text-slate-600 border border-slate-200 px-4 py-2 rounded-xl bg-white shadow-sm flex items-center gap-2 hover:bg-slate-50 transition-colors disabled:opacity-50"><i className={`fas ${isExporting ? 'fa-spinner fa-spin' : 'fa-arrow-up-from-bracket'}`} aria-hidden="true"></i> { isExporting ? t('Processing...') : t('Export') }</button>
+          {!readOnly && onUpdateProject && (<button onClick={(e) => { e.stopPropagation(); setShowProjectSettings(true); }} className="sp-button-secondary text-sm font-semibold text-slate-600 border border-slate-200 px-4 py-2 rounded-xl bg-white shadow-sm flex items-center gap-2 hover:bg-slate-50 transition-colors"><i className="fas fa-sliders-h"></i> {t('Settings')}</button>)}
           <div className="flex items-center bg-white rounded-full border border-slate-200 shadow-sm mx-2">
             <button onClick={handleZoomOut} disabled={timelineScale <= 1} className="w-10 h-10 flex items-center justify-center rounded-l-full hover:bg-slate-50 text-slate-500 transition-colors disabled:opacity-30" title={t('Shrink Timeline')} aria-label={t('Shrink Timeline')}><i className="fas fa-minus text-[10px]"></i></button>
             <div className="w-px h-4 bg-slate-100"></div>
             <button onClick={handleZoomIn} disabled={timelineScale >= 30} className="w-10 h-10 flex items-center justify-center rounded-r-full hover:bg-slate-50 text-slate-500 transition-colors disabled:opacity-30" title={t('Stretch Timeline')} aria-label={t('Stretch Timeline')}><i className="fas fa-plus text-[10px]"></i></button>
           </div>
-          <button onClick={fitToView} className="text-[9px] font-black text-slate-400 uppercase tracking-widest border border-slate-200 px-4 py-2 rounded-full bg-white transition-all hover:bg-slate-50 active:translate-y-0.5">{t('Reset View (H)')}</button>
+          <button onClick={fitToView} className="sp-button-secondary text-sm font-semibold text-slate-500 border border-slate-200 px-4 py-2 rounded-xl bg-white transition-all hover:bg-slate-50 active:translate-y-0.5">{t('Reset View (H)')}</button>
         </div>
       </footer>
       )}

@@ -2,6 +2,8 @@ import React, { useEffect, useId, useRef, useState } from 'react';
 import type { PublicWorkspace } from '@syncpath/api-client';
 import { useI18n } from '../i18n';
 import AppDialog from './AppDialog';
+import DatePicker from './DatePicker';
+import { parseCalendarDate } from '../utils/calendarDate';
 
 export interface ProjectDraft {
   name: string;
@@ -75,12 +77,11 @@ const ProjectFormDialog: React.FC<{
   const submit = async (event: React.FormEvent): Promise<void> => {
     event.preventDefault();
     if (savingRef.current) return;
-    // Native date controls may commit on blur rather than on each keystroke.
-    // Validate the values the user sees, including the final unblurred edit.
+    // DatePicker stores the selected ISO date in the form's hidden field.
     const fields = new FormData(event.currentTarget as HTMLFormElement);
     const submitted = { ...draft, startDate: String(fields.get('startDate') ?? draft.startDate), endDate: String(fields.get('endDate') ?? draft.endDate) };
     setDraft(submitted);
-    if (!submitted.name.trim() || !submitted.startDate || !submitted.endDate) {
+    if (!submitted.name.trim() || !parseCalendarDate(submitted.startDate) || !parseCalendarDate(submitted.endDate)) {
       setError(t('Choose a project and fill in the task name, start date, and end date.'));
       return;
     }
@@ -104,14 +105,14 @@ const ProjectFormDialog: React.FC<{
   const inputClass = 'w-full rounded-xl border border-slate-200 bg-white/80 px-4 py-3 text-sm text-slate-800 outline-none transition focus:border-indigo-500 focus:ring-4 focus:ring-indigo-50 disabled:opacity-60';
   return (
     <>
-      <div className="fixed inset-0 z-[3000] flex items-center justify-center bg-slate-950/45 p-3 backdrop-blur-lg sm:p-6" onMouseDown={(event) => { if (event.target === event.currentTarget) closeRef.current(); }}>
-        <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} className="flex max-h-[90vh] w-full max-w-xl flex-col overflow-hidden rounded-[2rem] border border-white/70 bg-white/95 shadow-[0_32px_100px_-24px_rgba(15,23,42,0.45)] backdrop-blur-2xl outline-none">
-          <header className="flex items-center justify-between gap-4 bg-slate-900 px-6 py-5 text-white sm:px-8">
+      <div className="sp-modal-backdrop fixed inset-0 z-[3000] flex items-center justify-center bg-slate-950/45 p-3 backdrop-blur-lg sm:p-6" onMouseDown={(event) => { if (event.target === event.currentTarget) closeRef.current(); }}>
+        <div ref={dialogRef} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} className="sp-dialog flex max-h-[90vh] w-full max-w-xl flex-col overflow-hidden rounded-[2rem] border border-white/70 bg-white/95 shadow-[0_32px_100px_-24px_rgba(15,23,42,0.45)] backdrop-blur-2xl outline-none">
+          <header className="sp-dialog-header flex items-center justify-between gap-4 px-6 py-5 sm:px-8">
             <div>
-              <p className="text-xs text-indigo-200">{workspace.name}</p>
+              <p className="sp-metadata">{workspace.name}</p>
               <h2 id={titleId} className="mt-1 text-xl font-bold">{t('New Task')}</h2>
             </div>
-            <button type="button" onClick={() => closeRef.current()} disabled={saving} aria-label={t('Close dialog')} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/10 text-slate-200 hover:bg-white/20 disabled:opacity-40"><i className="fas fa-times" /></button>
+            <button type="button" onClick={() => closeRef.current()} disabled={saving} aria-label={t('Close dialog')} className="sp-icon-button flex shrink-0 items-center justify-center disabled:opacity-40"><i className="fas fa-times" /></button>
           </header>
           <form onSubmit={submit} className="overflow-y-auto p-6 sm:p-8" noValidate>
             <fieldset disabled={saving} className="space-y-5">
@@ -119,9 +120,9 @@ const ProjectFormDialog: React.FC<{
                 {t('Task name')}
                 <input ref={nameRef} value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} placeholder={t('e.g. AI assistant launch')} className={`mt-2 ${inputClass}`} />
               </label>
-              <div className="grid grid-cols-2 gap-4">
-                <label className="block text-xs font-bold text-slate-600">{t('Start Date')}<input type="date" name="startDate" value={draft.startDate} onChange={(event) => setDraft({ ...draft, startDate: event.target.value })} onBlur={(event) => setDraft((current) => ({ ...current, startDate: event.target.value }))} className={`mt-2 ${inputClass}`} /></label>
-                <label className="block text-xs font-bold text-slate-600">{t('End Date')}<input type="date" name="endDate" value={draft.endDate} onChange={(event) => setDraft({ ...draft, endDate: event.target.value })} onBlur={(event) => setDraft((current) => ({ ...current, endDate: event.target.value }))} className={`mt-2 ${inputClass}`} /></label>
+              <div className="grid grid-cols-1 items-start gap-4 sm:grid-cols-2">
+                <DatePicker label={t('Start Date')} name="startDate" value={draft.startDate} max={draft.endDate} disabled={saving} onChange={(date) => setDraft((current) => ({ ...current, startDate: date }))} />
+                <DatePicker label={t('End Date')} name="endDate" value={draft.endDate} min={draft.startDate} disabled={saving} onChange={(date) => setDraft((current) => ({ ...current, endDate: date }))} />
               </div>
               <label className="block text-xs font-bold text-slate-600">{t('Description')}<textarea rows={3} value={draft.description} onChange={(event) => setDraft({ ...draft, description: event.target.value })} placeholder={t('Optional context for the team')} className={`mt-2 resize-y ${inputClass}`} /></label>
             </fieldset>

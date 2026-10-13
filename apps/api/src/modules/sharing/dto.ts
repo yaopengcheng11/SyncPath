@@ -31,6 +31,21 @@ export class SharedContent {
   @ApiProperty({ type: [PublicEntry] }) entries!: PublicEntry[];
 }
 
+export class ReceivedShareSharer {
+  @ApiProperty() username!: string;
+  @ApiProperty({ type: String, nullable: true }) displayName!: string | null;
+}
+
+export class ReceivedShare {
+  @ApiProperty({ format: 'uuid' }) id!: string;
+  @ApiProperty({ enum: ['workspace', 'project'] }) kind!: 'workspace' | 'project';
+  @ApiProperty() name!: string;
+  @ApiProperty() workspaceName!: string;
+  @ApiProperty({ type: ReceivedShareSharer }) sharedBy!: ReceivedShareSharer;
+  @ApiProperty() receivedAt!: string;
+  @ApiProperty({ enum: ['active', 'unavailable'] }) status!: 'active' | 'unavailable';
+}
+
 export function toPublicShareLink(link: ShareLink): PublicShareLink {
   return {
     id: link.id,

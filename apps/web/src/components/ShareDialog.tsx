@@ -22,10 +22,30 @@ interface ShareState {
   copyStatus: 'copied' | 'manual' | null;
 }
 
-const ShareDialog: React.FC<{ target: ShareTarget; onClose: () => void }> = ({ target, onClose }) => {
+interface ShareDialogProps {
+  target: ShareTarget;
+  targets?: ShareTarget[];
+  onClose: () => void;
+}
+
+const targetScope = (target: ShareTarget): string => `${target.kind}:${target.id}`;
+
+const ShareDialog: React.FC<ShareDialogProps> = ({ target, targets, onClose }) => {
+  const options = Array.from(new Map([target, ...(targets ?? [])].map((item) => [targetScope(item), item])).values());
+  const defaultScope = targetScope(target);
+  const [selection, setSelection] = useState({ defaultScope, selectedScope: defaultScope });
+  const selectedScope = selection.defaultScope === defaultScope ? selection.selectedScope : defaultScope;
+  const selected = options.find((item) => targetScope(item) === selectedScope) ?? target;
+
+  // Remounting invalidates the previous scope's request lease and clears its token.
+  return <ScopedShareDialog key={targetScope(selected)} target={selected} targets={options} onSelectScope={(scope) => setSelection({ defaultScope, selectedScope: scope })} onClose={onClose} />;
+};
+
+const ScopedShareDialog: React.FC<{ target: ShareTarget; targets: ShareTarget[]; onSelectScope: (scope: string) => void; onClose: () => void }> = ({ target, targets, onSelectScope, onClose }) => {
   const { t } = useI18n();
   const scope = `${target.kind}:${target.id}`;
   const titleId = useId();
+  const scopeInputId = useId();
   const linkInputId = useId();
   const dialogRef = useRef<HTMLDivElement>(null);
   const linkRef = useRef<HTMLInputElement>(null);
@@ -46,7 +66,7 @@ const ShareDialog: React.FC<{ target: ShareTarget; onClose: () => void }> = ({ t
       if (!dialogRef.current?.contains(document.activeElement) || event.isComposing) return;
       if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); closeRef.current(); }
       if (event.key === 'Tab') {
-        const items = Array.from(dialogRef.current.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), a[href]'));
+        const items = Array.from(dialogRef.current.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), select:not([disabled]), a[href]'));
         const first = items[0]; const last = items[items.length - 1];
         if (event.shiftKey && (document.activeElement === first || document.activeElement === dialogRef.current)) { event.preventDefault(); last?.focus(); }
         else if (!event.shiftKey && (document.activeElement === last || document.activeElement === dialogRef.current)) { event.preventDefault(); first?.focus(); }
@@ -129,19 +149,24 @@ const ShareDialog: React.FC<{ target: ShareTarget; onClose: () => void }> = ({ t
   };
 
   return <>
-    <div className="fixed inset-0 z-[3000] flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-sm" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <div ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby={titleId} className="flex max-h-[90vh] w-full max-w-xl flex-col overflow-hidden rounded-[2rem] border border-white/70 bg-white shadow-2xl outline-none">
-        <header className="flex items-start justify-between gap-4 bg-slate-900 px-6 py-5 text-white">
-          <div className="min-w-0"><h2 id={titleId} className="text-xl font-bold">{t(target.kind === 'workspace' ? 'Share Project' : 'Share Task')}</h2><p className="mt-1 break-words text-sm text-indigo-200">{target.name}</p></div>
-          <button type="button" onClick={onClose} aria-label={t('Close dialog')} className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/10 hover:bg-white/20"><i className="fas fa-times" /></button>
+    <div className="sp-modal-backdrop fixed inset-0 z-[3000] flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-sm" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+      <div ref={dialogRef} tabIndex={-1} role="dialog" aria-modal="true" aria-labelledby={titleId} className="sp-dialog flex max-h-[90vh] w-full max-w-xl flex-col overflow-hidden rounded-[2rem] border border-white/70 bg-white shadow-2xl outline-none">
+        <header className="sp-dialog-header flex items-start justify-between gap-4 px-6 py-5">
+          <div className="min-w-0"><h2 id={titleId} className="text-xl font-bold">{t('Share')}</h2><p className="sp-metadata mt-1 break-words">{target.name}</p></div>
+          <button type="button" onClick={onClose} aria-label={t('Close dialog')} className="sp-icon-button flex shrink-0 items-center justify-center"><i className="fas fa-times" /></button>
         </header>
         <div className="overflow-y-auto p-6">
+          <label htmlFor={scopeInputId} className="text-xs font-bold text-slate-700">{t('Sharing scope')}</label>
+          <select id={scopeInputId} value={scope} onChange={(event) => onSelectScope(event.target.value)} disabled={visible.busy || !!confirmRevoke} className="mt-2 mb-4 w-full min-w-0 rounded-xl border border-slate-200 bg-white px-3 py-3 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-indigo-400 disabled:opacity-50">
+            {targets.map((item) => <option key={targetScope(item)} value={targetScope(item)}>{t(item.kind === 'workspace' ? 'Project' : 'Task')} · {item.name}</option>)}
+          </select>
           <p className="text-sm leading-6 text-slate-600">{t(target.kind === 'workspace' ? 'Recipients can view this project and all active tasks, including tasks limited to task members, after registering or signing in. They cannot make changes.' : 'Recipients can view only this task after registering or signing in. They cannot make changes.')}</p>
           <button type="button" onClick={() => { void generate(); }} disabled={visible.busy || visible.loading} className="mt-5 rounded-xl bg-indigo-600 px-5 py-3 text-sm font-bold text-white hover:bg-indigo-700 disabled:opacity-50">{visible.busy ? t('Working…') : t('Generate sharing link')}</button>
           {visible.url && <div className="mt-5 rounded-2xl border border-indigo-100 bg-indigo-50/60 p-4">
             <label htmlFor={linkInputId} className="text-xs font-bold text-slate-700">{t('Read-only sharing link')}</label>
             <div className="mt-2 flex flex-wrap gap-2"><input ref={linkRef} id={linkInputId} readOnly value={visible.url} onFocus={(event) => event.target.select()} className="min-w-0 flex-1 rounded-lg border border-indigo-200 bg-white px-3 py-2 text-sm text-slate-700 outline-none focus:ring-2 focus:ring-indigo-400" /><button type="button" onClick={() => { void copy(); }} className="rounded-lg bg-white px-4 py-2 text-sm font-bold text-indigo-700 shadow-sm">{t('Copy link')}</button></div>
             <p className="mt-2 text-xs leading-5 text-slate-500">{t('Save this link now. Existing links can only be disabled here; generate a new one to share again.')}</p>
+            {targets.length > 1 && <p className="mt-1 text-xs leading-5 text-slate-500">{t('Save the generated link before changing the sharing scope.')}</p>}
             {visible.copyStatus && <p role="status" aria-live="polite" className="mt-2 text-sm text-indigo-700">{t(visible.copyStatus === 'copied' ? 'Link copied.' : 'Automatic copying is unavailable. The link is selected; please copy it manually.')}</p>}
           </div>}
           {visible.error && <div role="alert" className="mt-4 rounded-xl bg-red-50 p-3 text-sm text-red-600">{t(visible.error)}{visible.error === 'Could not load sharing links. Please try again.' && <button type="button" onClick={() => setReload((value) => value + 1)} className="ml-2 font-bold underline">{t('Retry')}</button>}</div>}

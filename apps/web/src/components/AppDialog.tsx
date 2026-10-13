@@ -7,10 +7,12 @@ interface AppDialogProps {
   open: boolean;
   title: string;
   message?: string;
+  error?: string;
   tone?: AppDialogTone;
   confirmLabel?: string;
   cancelLabel?: string;
   confirmDisabled?: boolean;
+  cancelDisabled?: boolean;
   onConfirm?: () => void;
   onCancel: () => void;
 }
@@ -46,10 +48,12 @@ const AppDialog: React.FC<AppDialogProps> = ({
   open,
   title,
   message,
+  error,
   tone = 'info',
   confirmLabel,
   cancelLabel,
   confirmDisabled = false,
+  cancelDisabled = false,
   onConfirm,
   onCancel
 }) => {
@@ -59,6 +63,8 @@ const AppDialog: React.FC<AppDialogProps> = ({
   const dialogRef = useRef<HTMLDivElement>(null);
   const onCancelRef = useRef(onCancel);
   onCancelRef.current = onCancel;
+  const cancelDisabledRef = useRef(cancelDisabled);
+  cancelDisabledRef.current = cancelDisabled;
 
   useEffect(() => {
     if (!open) return;
@@ -68,7 +74,7 @@ const AppDialog: React.FC<AppDialogProps> = ({
       if (event.key === 'Escape') {
         event.preventDefault();
         event.stopPropagation();
-        onCancelRef.current();
+        if (!cancelDisabledRef.current) onCancelRef.current();
       }
       if (event.key === 'Tab') {
         const items = Array.from(dialogRef.current.querySelectorAll<HTMLElement>('button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), a[href]'));
@@ -89,6 +95,10 @@ const AppDialog: React.FC<AppDialogProps> = ({
     };
   }, [open]);
 
+  useEffect(() => {
+    if (open && confirmDisabled) dialogRef.current?.focus();
+  }, [open, confirmDisabled]);
+
   if (!open) return null;
   const styles = TONE_STYLES[tone];
   const resolvedConfirmLabel = confirmLabel ?? t('Confirm');
@@ -96,13 +106,16 @@ const AppDialog: React.FC<AppDialogProps> = ({
 
   return (
     <div
-      className="fixed inset-0 z-[4000] flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-sm animate-in fade-in duration-200"
-      onMouseDown={onCancel}
+      className="sp-modal-backdrop fixed inset-0 z-[4000] flex items-center justify-center bg-slate-950/45 p-4 backdrop-blur-sm animate-in fade-in duration-200"
+      onMouseDown={(event) => {
+        event.stopPropagation();
+        if (event.target === event.currentTarget && !cancelDisabled) onCancel();
+      }}
       role="presentation"
     >
       <div
         ref={dialogRef}
-        className="w-full max-w-md rounded-[1.75rem] border border-white/70 bg-white p-7 shadow-2xl shadow-slate-950/20 animate-in zoom-in-95 duration-200"
+        className="sp-dialog w-full max-w-md rounded-[1.75rem] border border-white/70 bg-white p-7 shadow-2xl shadow-slate-950/20 animate-in zoom-in-95 duration-200"
         onMouseDown={(event) => event.stopPropagation()}
         role="dialog"
         aria-modal="true"
@@ -115,7 +128,7 @@ const AppDialog: React.FC<AppDialogProps> = ({
             <i className={`fas ${styles.icon} text-sm`}></i>
           </div>
           <div className="min-w-0 flex-1">
-            <h2 id={titleId} className="text-lg font-black tracking-tight text-slate-900">
+            <h2 id={titleId} className="text-lg font-semibold tracking-tight text-slate-900">
               {title}
             </h2>
             {message && <p id={messageId} className="mt-2 whitespace-pre-wrap text-sm leading-6 text-slate-500">{message}</p>}
@@ -123,17 +136,20 @@ const AppDialog: React.FC<AppDialogProps> = ({
           <button
             type="button"
             onClick={onCancel}
-            className="-mr-2 -mt-2 flex h-9 w-9 items-center justify-center rounded-xl text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700"
+            disabled={cancelDisabled}
+            className="-mr-2 -mt-2 flex h-9 w-9 items-center justify-center rounded-xl text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 disabled:opacity-40"
             aria-label={t('Close dialog')}
           >
             <i className="fas fa-times text-xs"></i>
           </button>
         </div>
+        {error && <p role="alert" className="mt-5 rounded-xl bg-red-50 px-4 py-3 text-sm leading-6 text-red-700">{error}</p>}
         <div className="mt-7 flex justify-end gap-3">
           <button
             type="button"
             onClick={onCancel}
-            className="rounded-xl border border-slate-200 px-4 py-2.5 text-xs font-black text-slate-600 transition-colors hover:bg-slate-50"
+            disabled={cancelDisabled}
+            className="sp-button-secondary rounded-xl border border-slate-200 px-4 py-2.5 text-xs font-semibold text-slate-600 transition-colors hover:bg-slate-50 disabled:opacity-40"
           >
             {resolvedCancelLabel}
           </button>
@@ -142,7 +158,7 @@ const AppDialog: React.FC<AppDialogProps> = ({
               type="button"
               onClick={onConfirm}
               disabled={confirmDisabled}
-              className={`rounded-xl px-4 py-2.5 text-xs font-black text-white transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${styles.confirmClass}`}
+              className={`${tone === 'danger' ? '' : 'sp-button-primary'} rounded-xl px-4 py-2.5 text-xs font-semibold text-white transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${styles.confirmClass}`}
             >
               {resolvedConfirmLabel}
             </button>

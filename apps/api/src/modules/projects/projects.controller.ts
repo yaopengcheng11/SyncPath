@@ -108,7 +108,7 @@ export class ProjectsController {
 
   @Delete(':id')
   @HttpCode(204)
-  @ApiOperation({ summary: 'Soft-delete a project within the workspace.' })
+  @ApiOperation({ summary: 'Permanently delete a project and its children within the workspace.' })
   async remove(
     @CurrentUser() user: User,
     @Param('workspaceId') workspaceId: string,
@@ -119,6 +119,6 @@ export class ProjectsController {
       user,
       expectedWorkspaceId: workspaceId
     });
-    await this.projects.softDelete({ project, user });
+    await this.projects.delete({ project, user });
   }
 }

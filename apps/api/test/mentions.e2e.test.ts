@@ -83,7 +83,7 @@ describe('project card mentions', () => {
     expect(created.status).toBe(201);
     entryId = created.body.id;
     expect(created.body.mentionAll).toBe(true);
-    expect(created.body.mentionedUserIds).toEqual([bob.id]);
+    expect(created.body.mentionedUserIds).toEqual([alice.id, bob.id]);
     const inbox = await call<Array<{ id: string; entry: { id: string }; readAt: string | null }>>('GET', '/api/v1/notifications', undefined, bob.cookie);
     expect(inbox.status).toBe(200);
     expect(inbox.body).toHaveLength(1);

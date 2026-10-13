@@ -12,29 +12,29 @@ interface MultiTimelineViewProps {
 const MultiTimelineView: React.FC<MultiTimelineViewProps> = ({ projects, logs, onBack }) => {
   const { t } = useI18n();
   return (
-    <div className="flex flex-col h-screen bg-slate-50 overflow-hidden">
-      <header className="px-12 py-6 border-b border-slate-200 bg-white z-20 shadow-sm flex items-center justify-between shrink-0">
-        <div className="flex items-center gap-4">
-          <button onClick={onBack} aria-label={t('Back to tasks')} className="w-10 h-10 bg-slate-100 hover:bg-slate-200 rounded-xl flex items-center justify-center text-slate-500 transition-all">
+    <div className="sp-app-shell flex flex-col h-screen bg-slate-50 overflow-hidden">
+      <header className="sp-topbar px-4 py-3 sm:px-6 border-b border-slate-200 bg-white z-20 flex items-center justify-between shrink-0">
+        <div className="flex min-w-0 w-full items-center gap-3">
+          <button onClick={onBack} aria-label={t('Back to tasks')} className="sp-icon-button shrink-0 border border-slate-200 bg-white flex items-center justify-center text-slate-500 transition-colors">
             <i className="fas fa-arrow-left"></i>
           </button>
-          <div>
-            <h2 className="text-2xl font-black text-slate-800 tracking-tight">{t('Multi-View')}</h2>
-            <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">{t('Interactive Mode: Space + Wheel to Zoom • Space + Drag to Pan')}</p>
+          <div className="min-w-0 flex-1">
+            <h2 className="sp-heading text-base font-semibold text-slate-800">{t('Multi-View')}</h2>
+            <p className="mt-0.5 text-xs leading-5 text-slate-500">{t('Interactive Mode: Space + Wheel to Zoom • Space + Drag to Pan')}</p>
           </div>
-          <div className="px-3 py-1 bg-indigo-50 text-indigo-600 rounded-lg text-[10px] font-black uppercase tracking-widest">
+          <div className="shrink-0 px-2.5 py-1 bg-slate-100 text-slate-600 rounded-lg text-xs font-medium">
             {projects.length} {t('Tasks')}
           </div>
         </div>
       </header>
       
-      <div className="flex-1 overflow-y-auto overflow-x-hidden p-8 space-y-8 bg-slate-100/50">
+      <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 sm:p-6 space-y-6 bg-slate-100/50">
         {projects.map((project, index) => (
-          <div key={project.id} className="bg-white rounded-[2.5rem] shadow-sm border border-slate-200/60 overflow-hidden flex flex-col h-[600px] transition-shadow hover:shadow-md">
+          <div key={project.id} className="sp-task-card bg-white rounded-[18px] border border-slate-200/60 overflow-hidden flex flex-col h-[600px]">
             {/* Header moved to static flow to prevent overlap */}
-            <div className="flex items-center gap-3 px-8 py-5 border-b border-slate-100 bg-white/50 backdrop-blur shrink-0">
-               <div className="w-3 h-3 rounded-full" style={{ backgroundColor: project.color }}></div>
-               <span className="font-black text-slate-800 text-sm">{project.name}</span>
+            <div className="sp-topbar flex items-center gap-3 px-4 py-3 border-b border-slate-100 bg-white/50 backdrop-blur shrink-0">
+               <div className="w-2 h-2 shrink-0 rounded-full" style={{ backgroundColor: project.color }}></div>
+               <span className="sp-heading break-words font-semibold text-slate-800 text-sm">{project.name}</span>
             </div>
             
             <div className="flex-1 relative overflow-hidden">
@@ -52,8 +52,8 @@ const MultiTimelineView: React.FC<MultiTimelineViewProps> = ({ projects, logs, o
         
         {projects.length === 0 && (
             <div className="flex flex-col items-center justify-center h-full text-slate-400">
-                <i className="fas fa-layer-group text-4xl mb-4 opacity-20"></i>
-                <p className="text-sm font-bold uppercase tracking-widest opacity-40">{t('No tasks selected')}</p>
+                <i className="fas fa-layer-group text-2xl mb-4 opacity-40"></i>
+                <p className="text-sm font-medium text-slate-500">{t('No tasks selected')}</p>
             </div>
         )}
       </div>

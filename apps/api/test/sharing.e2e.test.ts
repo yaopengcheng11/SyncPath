@@ -12,12 +12,17 @@ type Content = {
   projects: Array<{ id: string; name: string; myRole: string }>;
   entries: Array<{ id: string; projectId: string; title: string; revision: number }>;
 };
-type Account = { id: string; cookie: string };
+type Account = { id: string; cookie: string; username: string };
+type Receipt = {
+  id: string; kind: 'workspace' | 'project'; name: string; workspaceName: string;
+  sharedBy: { username: string; displayName: string | null };
+  receivedAt: string; status: 'active' | 'unavailable';
+};
 
-async function request<T = unknown>(method: string, path: string, body?: unknown, cookie?: string) {
+async function request<T = unknown>(method: string, path: string, body?: unknown, cookie?: string, expectedUserId?: string) {
   const response = await fetch(`${API}/api/v1${path}`, {
     method,
-    headers: { ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...(cookie ? { Cookie: cookie } : {}) },
+    headers: { ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}), ...(cookie ? { Cookie: cookie } : {}), ...(expectedUserId !== undefined ? { 'X-SyncPath-User-Id': expectedUserId } : {}) },
     body: body === undefined ? undefined : JSON.stringify(body)
   });
   const text = await response.text();
@@ -34,6 +39,7 @@ describe('Authenticated capability links are scoped and read-only', () => {
   let editor: Account;
   let viewer: Account;
   let outsider: Account;
+  let existingRecipient: Account;
   let workspaceId: string;
   let otherWorkspaceId: string;
   let projectId: string;
@@ -46,7 +52,7 @@ describe('Authenticated capability links are scoped and read-only', () => {
   let workspaceShare: Share;
 
   async function register(role: string): Promise<Account> {
-    const username = `share_${role}_${suffix}`;
+    const username = `share_${role.slice(0, 8)}_${suffix}`;
     const created = await request<{ user: { id: string } }>('POST', '/sessions/register', {
       username, email: `${username}@syncpath.test`, password: 'share-fixture-1234'
     });
@@ -54,7 +60,7 @@ describe('Authenticated capability links are scoped and read-only', () => {
     expect(created.cookie).toBeTruthy();
     const row = await prisma.user.findUniqueOrThrow({ where: { username } });
     ownedUserIds.push(row.id);
-    return { id: row.id, cookie: created.cookie! };
+    return { id: row.id, cookie: created.cookie!, username };
   }
 
   async function createProject(name: string, targetWorkspace = workspaceId, visibility: 'private' | 'workspace' = 'workspace'): Promise<string> {
@@ -83,12 +89,35 @@ describe('Authenticated capability links are scoped and read-only', () => {
     return request<Content>('POST', '/share-links/resolve', { token }, cookie);
   }
 
+  async function received(cookie = outsider.cookie) {
+    const result = await request<Receipt[]>('GET', '/received-shares', undefined, cookie);
+    expect(result.status).toBe(200);
+    return result.body;
+  }
+
+  async function receiptFor(linkId: string, userId = outsider.id) {
+    return prisma.receivedShare.findUniqueOrThrow({ where: { userId_linkId: { userId, linkId } } });
+  }
+
+  async function reopen(id: string, cookie = outsider.cookie) {
+    return request<Content>('POST', `/received-shares/${id}/resolve`, undefined, cookie);
+  }
+
+  async function expectUnavailableReceipt(linkId: string) {
+    const receipt = await receiptFor(linkId);
+    expect((await received()).find((item) => item.id === receipt.id)?.status).toBe('unavailable');
+    const result = await reopen(receipt.id);
+    expect(result.status).toBe(404);
+    expect(JSON.stringify(result.body)).not.toContain('Shared card');
+  }
+
   beforeAll(async () => {
     owner = await register('owner');
     admin = await register('admin');
     lead = await register('lead');
     editor = await register('editor');
     viewer = await register('viewer');
+    existingRecipient = await register('existing_recipient');
     const workspace = await request<{ id: string }>('POST', '/workspaces', { name: `Share fixture ${suffix}` }, owner.cookie);
     expect(workspace.status).toBe(201);
     workspaceId = workspace.body.id;
@@ -133,6 +162,7 @@ describe('Authenticated capability links are scoped and read-only', () => {
   it('does not disclose a shared target until the recipient registers or logs in', async () => {
     const anonymous = await request('POST', '/share-links/resolve', { token: taskShare.token });
     expect(anonymous.status).toBe(401);
+    expect(await prisma.receivedShare.count()).toBe(0);
     expect(JSON.stringify(anonymous.body)).not.toContain('Shared task');
     expect(JSON.stringify(anonymous.body)).not.toContain(workspaceId);
     outsider = await register('recipient');
@@ -161,6 +191,98 @@ describe('Authenticated capability links are scoped and read-only', () => {
     expect(JSON.stringify(result.body)).not.toContain('Other tenant');
     expect(JSON.stringify(result.body)).not.toContain(archivedSiblingId);
     expect(JSON.stringify(result.body)).not.toContain(deletedSiblingId);
+  });
+
+  it('remembers a share for an existing external account and reopens it after logout and login', async () => {
+    expect(await received(existingRecipient.cookie)).toEqual([]);
+    const opened = await resolve(taskShare.token, existingRecipient.cookie);
+    expect(opened.status).toBe(200);
+    const receipt = await receiptFor(taskShare.id, existingRecipient.id);
+    expect(await received(existingRecipient.cookie)).toEqual([{
+      id: receipt.id, kind: 'project', name: 'Shared task', workspaceName: `Share fixture ${suffix}`,
+      sharedBy: { username: owner.username, displayName: null },
+      receivedAt: receipt.receivedAt.toISOString(), status: 'active'
+    }]);
+    expect((await request('DELETE', '/sessions/me', undefined, existingRecipient.cookie)).status).toBe(200);
+    expect((await request('GET', '/received-shares', undefined, existingRecipient.cookie)).status).toBe(401);
+    const login = await request('POST', '/sessions', { username: existingRecipient.username, password: 'share-fixture-1234' });
+    expect(login.status).toBe(200);
+    expect(login.cookie).toBeTruthy();
+    existingRecipient.cookie = login.cookie!;
+    expect((await received(existingRecipient.cookie)).map((item) => item.id)).toEqual([receipt.id]);
+    expect((await reopen(receipt.id, existingRecipient.cookie)).body).toEqual(opened.body);
+    expect(await prisma.membership.count({ where: { userId: existingRecipient.id } })).toBe(0);
+    expect(await prisma.projectMember.count({ where: { userId: existingRecipient.id } })).toBe(0);
+    expect([403, 404]).toContain((await request('PATCH', `/entries/${cardId}`, { title: 'Receipt write', expectedRevision: 1 }, existingRecipient.cookie)).status);
+  });
+
+  it('deduplicates concurrent first acceptance and never updates receipts during content polling', async () => {
+    const link = await newTaskShare();
+    const responses = await Promise.all(Array.from({ length: 8 }, () => resolve(link.token)));
+    expect(responses.map((item) => item.status)).toEqual(Array(8).fill(200));
+    expect(await prisma.receivedShare.count({ where: { userId: outsider.id, linkId: link.id } })).toBe(1);
+    const before = await receiptFor(link.id);
+    await resolve(link.token);
+    await reopen(before.id);
+    const after = await receiptFor(link.id);
+    expect(after).toEqual(before);
+    expect(JSON.stringify(await received())).not.toContain(link.token);
+    expect(JSON.stringify(await received())).not.toContain('tokenHash');
+  });
+
+  it('rejects sharing reads after another tab switches the session account, before any receipt side effect', async () => {
+    const link = await newTaskShare();
+    const ownReceipt = await receiptFor(taskShare.id, existingRecipient.id);
+    const count = await prisma.receivedShare.count({ where: { userId: existingRecipient.id } });
+    const mismatched: Array<[string, string, unknown?]> = [
+      ['POST', '/share-links/resolve', { token: link.token }],
+      ['GET', '/received-shares'],
+      ['POST', `/received-shares/${ownReceipt.id}/resolve`]
+    ];
+    for (const [method, path, body] of mismatched) {
+      const result = await request<{ message: string }>(method, path, body, existingRecipient.cookie, outsider.id);
+      expect(result.status, path).toBe(401);
+      expect(result.body.message).toBe('Session changed');
+      expect(JSON.stringify(result.body)).not.toContain('Shared task');
+    }
+    expect(await prisma.receivedShare.count({ where: { userId: existingRecipient.id } })).toBe(count);
+    expect(await prisma.receivedShare.count({ where: { userId: existingRecipient.id, linkId: link.id } })).toBe(0);
+
+    const opened = await request<Content>('POST', '/share-links/resolve', { token: link.token }, existingRecipient.cookie, existingRecipient.id);
+    expect(opened.status).toBe(200);
+    const receipt = await receiptFor(link.id, existingRecipient.id);
+    const listing = await request<Receipt[]>('GET', '/received-shares', undefined, existingRecipient.cookie, existingRecipient.id);
+    expect(listing.status).toBe(200);
+    expect(listing.body.some((item) => item.id === receipt.id)).toBe(true);
+    const reopened = await request<Content>('POST', `/received-shares/${receipt.id}/resolve`, undefined, existingRecipient.cookie, existingRecipient.id);
+    expect(reopened.status).toBe(200);
+    expect(reopened.body).toEqual(opened.body);
+    expect((await request('GET', '/received-shares', undefined, undefined, existingRecipient.id)).status).toBe(401);
+  });
+
+  it('lists only the current account receipts and never resolves another recipients guessed ID', async () => {
+    const receipt = await receiptFor(taskShare.id);
+    expect((await received(existingRecipient.cookie)).some((item) => item.id === receipt.id)).toBe(false);
+    expect((await reopen(receipt.id, existingRecipient.cookie)).status).toBe(404);
+    expect((await reopen(newId(), existingRecipient.cookie)).status).toBe(404);
+    expect((await request('POST', `/received-shares/${receipt.id}/resolve`)).status).toBe(401);
+    expect((await request('GET', '/received-shares')).status).toBe(401);
+  });
+
+  it('reopens task and whole-workspace receipts with the exact original scope and Viewer roles', async () => {
+    const taskReceipt = await receiptFor(taskShare.id);
+    const workspaceReceipt = await receiptFor(workspaceShare.id);
+    const task = await reopen(taskReceipt.id);
+    expect(task.status).toBe(200);
+    expect(task.body.projects.map((item) => item.id)).toEqual([projectId]);
+    expect(task.body.entries.map((item) => item.id)).toEqual([cardId]);
+    const workspace = await reopen(workspaceReceipt.id);
+    expect(workspace.status).toBe(200);
+    expect(workspace.body.projects.map((item) => item.id).sort()).toEqual([projectId, privateSiblingId, publicSiblingId].sort());
+    expect(workspace.body.projects.every((item) => item.myRole === 'Viewer')).toBe(true);
+    expect((await received()).find((item) => item.id === workspaceReceipt.id)).toMatchObject({
+      kind: 'workspace', name: `Share fixture ${suffix}`, workspaceName: `Share fixture ${suffix}`, status: 'active'
+    });
   });
 
   it('never creates workspace or task membership, or access through ordinary read routes', async () => {
@@ -235,6 +357,7 @@ describe('Authenticated capability links are scoped and read-only', () => {
     expect((await request('DELETE', `/share-links/${link.id}`, undefined, admin.cookie)).status).toBe(204);
     expect((await request('DELETE', `/share-links/${link.id}`, undefined, admin.cookie)).status).toBe(204);
     expect((await resolve(link.token)).status).toBe(404);
+    await expectUnavailableReceipt(link.id);
     const listing = await request<Array<{ id: string; revokedAt: string | null }>>('GET', `/projects/${projectId}/share-links`, undefined, admin.cookie);
     expect(listing.body.find((item) => item.id === link.id)?.revokedAt).toBeTruthy();
   });
@@ -243,57 +366,88 @@ describe('Authenticated capability links are scoped and read-only', () => {
     const link = await newTaskShare(lead.cookie);
     expect((await resolve(link.token)).status).toBe(200);
     await prisma.projectMember.update({ where: { projectId_userId: { projectId, userId: lead.id } }, data: { role: 'Editor' } });
-    try { expect((await resolve(link.token)).status).toBe(404); }
+    try {
+      expect((await resolve(link.token)).status).toBe(404);
+      await expectUnavailableReceipt(link.id);
+    }
     finally { await prisma.projectMember.update({ where: { projectId_userId: { projectId, userId: lead.id } }, data: { role: 'Lead' } }); }
   });
 
   it('immediately rejects a workspace link when its administrator is demoted', async () => {
     const link = await request<Share>('POST', `/workspaces/${workspaceId}/share-links`, undefined, admin.cookie);
     expect(link.status).toBe(201);
+    expect((await resolve(link.body.token)).status).toBe(200);
     await prisma.membership.update({ where: { workspaceId_userId: { workspaceId, userId: admin.id } }, data: { role: 'Member' } });
-    try { expect((await resolve(link.body.token)).status).toBe(404); }
+    try {
+      expect((await resolve(link.body.token)).status).toBe(404);
+      await expectUnavailableReceipt(link.body.id);
+    }
     finally { await prisma.membership.update({ where: { workspaceId_userId: { workspaceId, userId: admin.id } }, data: { role: 'Admin' } }); }
   });
 
   it('rejects a task link when its creator loses parent membership even if a task Lead row remains', async () => {
     const link = await newTaskShare(lead.cookie);
+    expect((await resolve(link.token)).status).toBe(200);
     const membership = await prisma.membership.findUniqueOrThrow({ where: { workspaceId_userId: { workspaceId, userId: lead.id } } });
     await prisma.membership.delete({ where: { id: membership.id } });
-    try { expect((await resolve(link.token)).status).toBe(404); }
+    try {
+      expect((await resolve(link.token)).status).toBe(404);
+      await expectUnavailableReceipt(link.id);
+    }
     finally { await prisma.membership.create({ data: membership }); }
   });
 
   it('rejects links from suspended or soft-deleted creators without exposing their former target', async () => {
     const link = await newTaskShare(lead.cookie);
+    expect((await resolve(link.token)).status).toBe(200);
     await prisma.user.update({ where: { id: lead.id }, data: { status: 'suspended' } });
-    try { expect((await resolve(link.token)).status).toBe(404); }
+    try {
+      expect((await resolve(link.token)).status).toBe(404);
+      await expectUnavailableReceipt(link.id);
+    }
     finally { await prisma.user.update({ where: { id: lead.id }, data: { status: 'active' } }); }
     await prisma.user.update({ where: { id: lead.id }, data: { deletedAt: new Date() } });
-    try { expect((await resolve(link.token)).status).toBe(404); }
+    try {
+      expect((await resolve(link.token)).status).toBe(404);
+      await expectUnavailableReceipt(link.id);
+    }
     finally { await prisma.user.update({ where: { id: lead.id }, data: { deletedAt: null } }); }
   });
 
   it('requires an active recipient account for every new resolution', async () => {
+    const receipt = await receiptFor(taskShare.id);
     await prisma.user.update({ where: { id: outsider.id }, data: { status: 'suspended' } });
-    try { expect((await resolve(taskShare.token)).status).toBe(401); }
+    try {
+      expect((await resolve(taskShare.token)).status).toBe(401);
+      expect((await reopen(receipt.id)).status).toBe(401);
+      expect((await request('GET', '/received-shares', undefined, outsider.cookie)).status).toBe(401);
+    }
     finally { await prisma.user.update({ where: { id: outsider.id }, data: { status: 'active' } }); }
     await prisma.user.update({ where: { id: outsider.id }, data: { deletedAt: new Date() } });
-    try { expect((await resolve(taskShare.token)).status).toBe(401); }
+    try {
+      expect((await resolve(taskShare.token)).status).toBe(401);
+      expect((await reopen(receipt.id)).status).toBe(401);
+      expect((await request('GET', '/received-shares', undefined, outsider.cookie)).status).toBe(401);
+    }
     finally { await prisma.user.update({ where: { id: outsider.id }, data: { deletedAt: null } }); }
   });
 
   it('rejects a task link after archive or soft-delete', async () => {
     const archivedTask = await createProject('Task to archive');
     const archivedLink = await newTaskShare(owner.cookie, archivedTask);
+    expect((await resolve(archivedLink.token)).status).toBe(200);
     await prisma.project.update({ where: { id: archivedTask }, data: { status: 'archived' } });
     expect((await resolve(archivedLink.token)).status).toBe(404);
+    await expectUnavailableReceipt(archivedLink.id);
     expect((await request('DELETE', `/share-links/${archivedLink.id}`, undefined, admin.cookie)).status).toBe(204);
     await prisma.project.update({ where: { id: archivedTask }, data: { status: 'active' } });
     expect((await resolve(archivedLink.token)).status).toBe(404);
     const deletedTask = await createProject('Task to delete');
     const deletedLink = await newTaskShare(owner.cookie, deletedTask);
+    expect((await resolve(deletedLink.token)).status).toBe(200);
     await prisma.project.update({ where: { id: deletedTask }, data: { deletedAt: new Date() } });
     expect((await resolve(deletedLink.token)).status).toBe(404);
+    await expectUnavailableReceipt(deletedLink.id);
   });
 
   it('rejects both workspace and nested task links after their parent project is archived', async () => {
@@ -301,18 +455,59 @@ describe('Authenticated capability links are scoped and read-only', () => {
     try {
       expect((await resolve(workspaceShare.token)).status).toBe(404);
       expect((await resolve(taskShare.token)).status).toBe(404);
+      await expectUnavailableReceipt(workspaceShare.id);
+      await expectUnavailableReceipt(taskShare.id);
     } finally { await prisma.workspace.update({ where: { id: workspaceId }, data: { deletedAt: null } }); }
   });
 
   it('uses one unavailable envelope for malformed, unknown and revoked tokens', async () => {
     const link = await newTaskShare();
     await request('DELETE', `/share-links/${link.id}`, undefined, owner.cookie);
+    const receiptCount = await prisma.receivedShare.count({ where: { userId: outsider.id } });
     for (const token of ['', 'bad-token', randomBytes(32).toString('base64url'), link.token]) {
       const result = await request<{ code: string; message: string }>('POST', '/share-links/resolve', { token }, outsider.cookie);
       expect(result.status).toBe(404);
       expect(result.body.code).toBe('share_not_found');
       expect(result.body.message).toBe('Share link not found or unavailable.');
     }
+    expect(await prisma.receivedShare.count({ where: { userId: outsider.id } })).toBe(receiptCount);
+  });
+
+  it('preserves an unavailable metadata snapshot when the original task, workspace or creator is physically deleted', async () => {
+    const task = await createProject('Receipt task removed');
+    const taskLink = await newTaskShare(owner.cookie, task);
+    expect((await resolve(taskLink.token)).status).toBe(200);
+    const taskReceipt = await receiptFor(taskLink.id);
+    await prisma.project.delete({ where: { id: task } });
+    expect((await received()).find((item) => item.id === taskReceipt.id)).toMatchObject({
+      name: 'Receipt task removed', sharedBy: { username: owner.username }, status: 'unavailable'
+    });
+    expect((await reopen(taskReceipt.id)).status).toBe(404);
+    expect((await prisma.receivedShare.findUniqueOrThrow({ where: { id: taskReceipt.id } })).linkId).toBeNull();
+
+    const workspace = await request<{ id: string }>('POST', '/workspaces', { name: 'Receipt project removed' }, owner.cookie);
+    expect(workspace.status).toBe(201);
+    ownedWorkspaceIds.push(workspace.body.id);
+    const workspaceLink = await request<Share>('POST', `/workspaces/${workspace.body.id}/share-links`, undefined, owner.cookie);
+    expect(workspaceLink.status).toBe(201);
+    expect((await resolve(workspaceLink.body.token)).status).toBe(200);
+    const workspaceReceipt = await receiptFor(workspaceLink.body.id);
+    await prisma.workspace.delete({ where: { id: workspace.body.id } });
+    expect((await received()).find((item) => item.id === workspaceReceipt.id)).toMatchObject({ name: 'Receipt project removed', status: 'unavailable' });
+    expect((await reopen(workspaceReceipt.id)).status).toBe(404);
+
+    const temporaryCreator = await register('removed_creator');
+    await prisma.membership.create({ data: { id: newId(), workspaceId, userId: temporaryCreator.id, role: 'Member' } });
+    await prisma.projectMember.create({ data: { id: newId(), projectId, userId: temporaryCreator.id, role: 'Lead' } });
+    await prisma.user.update({ where: { id: temporaryCreator.id }, data: { displayName: 'Former sharer' } });
+    const creatorLink = await newTaskShare(temporaryCreator.cookie);
+    expect((await resolve(creatorLink.token)).status).toBe(200);
+    const creatorReceipt = await receiptFor(creatorLink.id);
+    await prisma.user.delete({ where: { id: temporaryCreator.id } });
+    expect((await received()).find((item) => item.id === creatorReceipt.id)).toMatchObject({
+      sharedBy: { username: temporaryCreator.username, displayName: 'Former sharer' }, status: 'unavailable'
+    });
+    expect((await reopen(creatorReceipt.id)).status).toBe(404);
   });
 
   it('rejects a database link that points at a task in a different workspace', async () => {

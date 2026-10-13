@@ -42,9 +42,9 @@ esac
 say "Detected $ARCH_LABEL ($ARCH)"
 
 # ── 1. Node ────────────────────────────────────────────────────────────────
-command -v node >/dev/null 2>&1 || die "Node.js not found. Install Node 18.18+ from https://nodejs.org, then re-run this script."
+command -v node >/dev/null 2>&1 || die "Node.js not found. Install Node 20+ from https://nodejs.org, then re-run this script."
 NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]')"
-[ "$NODE_MAJOR" -ge 18 ] || die "Node $(node -v) is too old — this project needs >= 18.18.0."
+[ "$NODE_MAJOR" -ge 20 ] || die "Node $(node -v) is too old — this project needs >= 20.0.0."
 say "Node $(node -v), npm $(npm -v)"
 
 # ── 2. Homebrew (only used to install PostgreSQL) ──────────────────────────

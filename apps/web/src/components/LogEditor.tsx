@@ -136,9 +136,8 @@ const LogEditor: React.FC<LogEditorProps> = ({
       ? [{ id: 'all', label: allLabel, detail: t('Notify everyone on this task'), all: true }]
       : [];
     // The signed-in user stays in the list: @-ing yourself is a legitimate
-    // "this one is mine" marker. MentionsService.resolve() already drops the
-    // actor from the recipient set, so this never sends you a notification
-    // about your own card.
+    // "this one is mine" marker and belongs in their mentions timeline.
+    // The server preserves that selection while skipping self-notifications.
     const people = labels
       .filter((candidate) => !query || candidate.label.toLocaleLowerCase().includes(query) || candidate.detail.toLocaleLowerCase().includes(query))
       .map((candidate) => ({ ...candidate, all: false, self: candidate.id === currentUserId }));
@@ -346,7 +345,7 @@ const LogEditor: React.FC<LogEditorProps> = ({
   const dateLabel = formatDate(baseline.weekStartDate);
 
   return (
-    <div ref={overlayRef} className="fixed inset-0 z-[3000] flex items-center justify-center bg-slate-950/45 p-3 backdrop-blur-lg sm:p-6" onMouseDown={(event) => { if (event.target === event.currentTarget) requestClose(); }} onKeyDown={(event) => {
+    <div ref={overlayRef} className="sp-modal-backdrop fixed inset-0 z-[3000] flex items-center justify-center bg-slate-950/45 p-3 backdrop-blur-lg sm:p-6" onMouseDown={(event) => { if (event.target === event.currentTarget) requestClose(); }} onKeyDown={(event) => {
       if (event.key !== 'Tab') return;
       const dialogs = overlayRef.current?.querySelectorAll<HTMLElement>('[role="dialog"]');
       const activeDialog = dialogs?.[dialogs.length - 1] ?? dialogRef.current;
@@ -365,15 +364,15 @@ const LogEditor: React.FC<LogEditorProps> = ({
         aria-modal="true"
         aria-labelledby={titleId}
         tabIndex={-1}
-        className="flex max-h-[min(90vh,820px)] w-full max-w-[780px] flex-col overflow-hidden rounded-[2rem] border border-white/70 bg-white/90 shadow-[0_32px_100px_-24px_rgba(15,23,42,0.45)] backdrop-blur-2xl outline-none"
+        className="sp-dialog flex max-h-[min(90vh,820px)] w-full max-w-[780px] flex-col overflow-hidden rounded-[2rem] border border-white/70 bg-white/90 shadow-[0_32px_100px_-24px_rgba(15,23,42,0.45)] backdrop-blur-2xl outline-none"
         onFocusCapture={(event) => { if (event.target instanceof HTMLElement) lastEditorFocusRef.current = event.target; }}
       >
-        <header className="flex shrink-0 items-start justify-between gap-4 bg-slate-900 px-6 py-5 text-white sm:px-8">
+        <header className="sp-dialog-header flex shrink-0 items-start justify-between gap-4 px-6 py-5 sm:px-8">
           <div>
-            <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-indigo-300">{dateLabel}</p>
+            <p className="sp-metadata">{dateLabel}</p>
             <h2 id={titleId} className="mt-1 text-xl font-bold tracking-tight">{existingCardRef.current ? t('Edit card') : t('New card')}</h2>
           </div>
-          <button type="button" onClick={requestClose} disabled={saving} className="flex h-9 w-9 items-center justify-center rounded-full bg-white/10 text-slate-200 transition-colors hover:bg-white/20 disabled:opacity-50" aria-label={t('Close dialog')}>
+          <button type="button" onClick={requestClose} disabled={saving} className="sp-icon-button flex items-center justify-center transition-colors disabled:opacity-50" aria-label={t('Close dialog')}>
             <i className="fas fa-times text-sm" />
           </button>
         </header>

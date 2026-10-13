@@ -8,9 +8,9 @@ module.exports = {
   theme: {
     extend: {
       colors: {
-        // Brand-aligned extensions; keep Tailwind's slate/indigo palette as
-        // the source of truth and document overrides here if needed later.
-        // See docs/SYNCPATH_BRAND_STYLE.md for the canonical token table.
+        // Legacy utility palette stays available for gradual migration.
+        // Shared semantic colors live in src/index.css (--sp-*);
+        // see docs/SYNCPATH_DESIGN_SYSTEM.md for current component tokens.
       },
       fontFamily: {
         // System font stack per docs/SYNCPATH_BRAND_STYLE.md §3.

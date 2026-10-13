@@ -1,14 +1,196 @@
-/* Tailwind entry point.
- *
- * The legacy index.html loaded Tailwind from cdn.tailwindcss.com at runtime,
- * which conflicted with the npm dependency declared in package.json and
- * with docs/SYNCPATH_DEVELOPMENT_FRAMEWORK_ACCEPTANCE.md §4.1 ("样式构建进入
- * 项目，去掉运行时 Tailwind CDN"). We compile Tailwind locally instead.
- *
- * Keep this file tiny: only Tailwind layers and brand-specific extensions.
- * Per-component styling stays inside the .tsx files.
- */
-
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* One semantic palette for navigation, cards, dialogs and exported previews. */
+:root {
+  color-scheme: light;
+  --sp-canvas: #f4f5f8;
+  --sp-surface: #ffffff;
+  --sp-raised: #f9fafc;
+  --sp-hover: #edf0f5;
+  --sp-text: #202635;
+  --sp-secondary: #465166;
+  --sp-muted: #5d697e;
+  --sp-border: #d4dae5;
+  --sp-control-border: #808b9e;
+  --sp-accent: #6454d7;
+  --sp-accent-soft: #f0edff;
+  --sp-focus: #6454d7;
+  --sp-primary: #252b38;
+  --sp-primary-text: #ffffff;
+  --sp-primary-hover: #3b4353;
+  --sp-glass: rgb(255 255 255 / 94%);
+  --sp-backdrop: rgb(26 31 43 / 38%);
+  --sp-shadow: 0 20px 64px -28px rgb(25 32 49 / 28%);
+  --sp-modal-shadow: 0 32px 100px -24px rgb(16 21 34 / 38%);
+  --sp-milestone: #dba934;
+  --sp-phase: #6454d7;
+  --sp-detail: #708096;
+  --timeline-stem-base: #dce2eb;
+  --timeline-phase-color: var(--sp-phase);
+  --timeline-detail-color: var(--sp-detail);
+  --timeline-track-past: #cad2de;
+  --timeline-track-future: #718099;
+}
+html[data-theme='dark'] {
+  color-scheme: dark;
+  --sp-canvas: #111214;
+  --sp-surface: #191b1f;
+  --sp-raised: #202328;
+  --sp-hover: #2b2f36;
+  --sp-text: #eff1f5;
+  --sp-secondary: #c1c6d0;
+  --sp-muted: #a0a8b6;
+  --sp-border: #383e48;
+  --sp-control-border: #707b8d;
+  --sp-accent: #b4acff;
+  --sp-accent-soft: #29263b;
+  --sp-focus: #ac9cfa;
+  --sp-primary: #e2e4e9;
+  --sp-primary-text: #191b1f;
+  --sp-primary-hover: #ffffff;
+  --sp-glass: rgb(27 29 34 / 95%);
+  --sp-backdrop: rgb(4 5 8 / 64%);
+  --sp-shadow: 0 20px 64px -28px rgb(0 0 0 / 60%);
+  --sp-modal-shadow: 0 32px 100px -24px rgb(0 0 0 / 75%);
+  --sp-milestone: #e4bc62;
+  --sp-phase: #b4acff;
+  --sp-detail: #a0a8b6;
+  --timeline-stem-base: #383e48;
+  --timeline-track-past: #49515e;
+  --timeline-track-future: #8b96a8;
+}
+html, body { background: var(--sp-canvas); color: var(--sp-text); }
+body { -webkit-font-smoothing: antialiased; }
+html:root :is(button, a, input, textarea, select, [tabindex]:not([tabindex='-1'])):focus-visible { outline: 2px solid var(--sp-focus); outline-offset: 3px; }
+:is(input, textarea)::placeholder { color: var(--sp-muted); opacity: 1; }
+::selection { background: var(--sp-accent-soft); color: var(--sp-text); }
+
+/* Compatibility for existing panels; statuses retain their semantic colors. */
+html[data-theme='dark'] :is(.bg-white, .bg-white\/95, .bg-white\/90, .bg-white\/80, .bg-white\/75, .bg-white\/60, .bg-white\/55, .bg-white\/50) { background-color: var(--sp-surface); }
+html[data-theme='dark'] :is(.bg-slate-50, .bg-slate-50\/70, .bg-slate-50\/50, .bg-slate-50\/10) { background-color: var(--sp-canvas); }
+html[data-theme='dark'] :is(.bg-slate-100, .bg-slate-100\/85, .bg-slate-100\/80, .bg-slate-100\/50) { background-color: var(--sp-raised); }
+html[data-theme='dark'] .bg-slate-200 { background-color: #383e48; }
+html[data-theme='dark'] .bg-slate-300 { background-color: #657187; }
+html[data-theme='dark'] .bg-slate-400 { background-color: var(--sp-detail); }
+html[data-theme='dark'] .bg-slate-800 { background-color: #303641; }
+html[data-theme='dark'] .bg-slate-900 { background-color: #282d36; }
+html[data-theme='dark'] :is(.bg-slate-900\/40, .bg-slate-950\/40, .bg-slate-950\/45) { background-color: var(--sp-backdrop); }
+html[data-theme='dark'] :is(.bg-indigo-50, .bg-indigo-50\/70, .bg-indigo-50\/60, .bg-indigo-50\/50, .bg-indigo-50\/40, .bg-indigo-100) { background-color: var(--sp-accent-soft); }
+html[data-theme='dark'] .bg-indigo-500 { background-color: #8b7dda; }
+html[data-theme='dark'] .bg-indigo-500\/20 { background-color: rgb(172 156 250 / 16%); }
+html[data-theme='dark'] .bg-indigo-500\/50 { background-color: rgb(172 156 250 / 45%); }
+html[data-theme='dark'] .bg-indigo-600 { background-color: #6356b5; }
+html[data-theme='dark'] .bg-indigo-700 { background-color: #7769ca; }
+html[data-theme='dark'] :is(.min-h-screen.bg-white, [data-capture-wrapper], [data-inner-container]) { background-color: var(--sp-canvas); }
+html[data-theme='dark'] :is(.bg-red-50, .bg-rose-50) { background-color: #321e27; }
+html[data-theme='dark'] :is(.bg-amber-50, .bg-amber-50\/90, .bg-amber-100) { background-color: #32291b; }
+html[data-theme='dark'] .bg-emerald-50 { background-color: #183227; }
+html[data-theme='dark'] :is(.text-slate-900, .text-slate-800) { color: var(--sp-text); }
+html[data-theme='dark'] :is(.text-slate-700, .text-slate-600) { color: var(--sp-secondary); }
+html[data-theme='dark'] :is(.text-slate-500, .text-slate-400, .text-slate-300) { color: var(--sp-muted); }
+html[data-theme='dark'] .text-slate-200 { color: var(--sp-secondary); }
+html[data-theme='dark'] :is(.text-indigo-900, .text-indigo-800, .text-indigo-700, .text-indigo-600, .text-indigo-500, .text-indigo-300, .text-indigo-200) { color: var(--sp-accent); }
+html[data-theme='dark'] :is(.text-red-600, .text-red-700, .text-rose-600, .text-rose-700) { color: #ffb2bd; }
+html[data-theme='dark'] :is(.text-amber-950, .text-amber-900\/80, .text-amber-600) { color: #f2d68b; }
+html[data-theme='dark'] .text-emerald-600 { color: #81dfb6; }
+html[data-theme='dark'] .bg-amber-400.text-slate-900 { color: #202635; }
+html[data-theme='dark'] :is(.border-slate-50, .border-slate-100, .border-slate-200, .border-slate-200\/80, .border-slate-200\/60, .border-white\/70, .border-white\/80) { border-color: var(--sp-border); }
+html[data-theme='dark'] :is(.border-slate-300, .border-slate-800, .border-slate-900, .border-slate-400) { border-color: var(--sp-control-border); }
+html[data-theme='dark'] :is(.border-indigo-100, .border-indigo-200, .border-indigo-300, .border-indigo-400, .border-indigo-500, .border-indigo-600) { border-color: #746895; }
+html[data-theme='dark'] :is(.border-red-100, .border-red-200) { border-color: #794351; }
+html[data-theme='dark'] :is(.border-amber-200, .border-amber-200\/75) { border-color: #806737; }
+html[data-theme='dark'] :is(.hover\:bg-white:hover, .hover\:bg-white\/60:hover, .hover\:bg-white\/55:hover, .hover\:bg-slate-50:hover, .hover\:bg-slate-100:hover, .hover\:bg-slate-200:hover, .hover\:bg-indigo-50:hover, .hover\:bg-indigo-50\/40:hover) { background-color: var(--sp-hover); }
+html[data-theme='dark'] :is(.hover\:bg-slate-800:hover, .hover\:bg-indigo-700:hover) { background-color: #454c5a; }
+html[data-theme='dark'] :is(.hover\:bg-rose-50:hover, .hover\:bg-red-50:hover) { background-color: #482832; }
+html[data-theme='dark'] .hover\:bg-amber-100:hover { background-color: #443721; }
+html[data-theme='dark'] .hover\:bg-emerald-50:hover { background-color: #244635; }
+html[data-theme='dark'] :is(.hover\:text-slate-500:hover, .hover\:text-slate-600:hover, .hover\:text-slate-700:hover, .hover\:text-indigo-500:hover, .hover\:text-indigo-600:hover, .hover\:text-indigo-700:hover) { color: var(--sp-text); }
+html[data-theme='dark'] :is(.hover\:border-indigo-200:hover, .hover\:border-indigo-300:hover, .hover\:border-slate-300:hover, .hover\:border-slate-400:hover) { border-color: var(--sp-control-border); }
+html[data-theme='dark'] :is(.hover\:text-rose-700:hover, .hover\:text-red-700:hover) { color: #ffd0d6; }
+html[data-theme='dark'] :is(.ring-indigo-200, .ring-indigo-500\/50, .ring-slate-200\/80) { --tw-ring-color: var(--sp-focus); }
+html[data-theme='dark'] :is(.focus\:border-indigo-400:focus, .focus\:border-indigo-500:focus, .focus\:border-indigo-600:focus) { border-color: var(--sp-focus); }
+html[data-theme='dark'] :is(.focus\:ring-indigo-50:focus, .focus\:ring-indigo-100:focus) { --tw-ring-color: rgb(172 156 250 / 20%); }
+html[data-theme='dark'] :is(.focus-visible\:ring-indigo-400:focus-visible, .focus-visible\:ring-indigo-500:focus-visible) { --tw-ring-color: var(--sp-focus); }
+html[data-theme='dark'] :is(.focus-visible\:ring-offset-4:focus-visible, .ring-offset-2) { --tw-ring-offset-color: var(--sp-surface); }
+html[data-theme='dark'] .accent-indigo-600 { accent-color: var(--sp-accent); }
+html[data-theme='dark'] :is(.shadow-indigo-200, .shadow-slate-200, .shadow-slate-900\/10, .shadow-slate-900\/15) { --tw-shadow-color: rgb(0 0 0 / 35%); }
+
+/* Bright primary controls remain distinct from structural charcoal surfaces. */
+html[data-theme='dark'] button:is(.bg-slate-900, .bg-indigo-600) { background: var(--sp-primary); color: var(--sp-primary-text); }
+html[data-theme='dark'] button:is(.bg-slate-900, .bg-indigo-600):hover { background: var(--sp-primary-hover); }
+
+/* Semantic rules override the compatibility utilities above. */
+html:root .sp-app-shell { background: var(--sp-canvas); color: var(--sp-text); }
+html:root .sp-topbar { background: var(--sp-glass); border-color: var(--sp-border); backdrop-filter: blur(20px); }
+html:root .sp-brand-mark { background: var(--sp-primary); color: var(--sp-primary-text); box-shadow: none; }
+html:root .sp-heading { color: var(--sp-text); font-weight: 650; letter-spacing: -.025em; }
+html:root .sp-metadata { color: var(--sp-muted); font-size: 12px; line-height: 1.6; }
+html:root .sp-project-strip { background: var(--sp-surface); border-color: var(--sp-border); }
+html:root .sp-project-chip { background: transparent; color: var(--sp-secondary); border-color: transparent; border-radius: 10px; }
+html:root .sp-project-chip { min-height: 36px; }
+html:root .sp-project-chip:hover { background: var(--sp-hover); }
+html:root .sp-project-chip-active { background: var(--sp-accent-soft); color: var(--sp-accent); border-color: transparent; }
+html:root .sp-task-card { background: var(--sp-surface); border-color: var(--sp-border); border-radius: 18px; box-shadow: 0 2px 4px rgb(20 25 38 / 2%); transition: border-color .16s, box-shadow .16s, background .16s; }
+html:root .sp-task-card:hover { border-color: var(--sp-control-border); box-shadow: 0 8px 28px -16px rgb(20 25 38 / 24%); }
+html:root .sp-task-card[data-selected='true'] { background: var(--sp-accent-soft); border-color: var(--sp-focus); }
+html:root .sp-task-card-selection { background: var(--sp-surface); border-color: var(--sp-control-border); color: var(--sp-secondary); }
+html:root .sp-task-card-selection[aria-pressed='true'] { background: var(--sp-accent); color: var(--sp-surface); border-color: var(--sp-accent); }
+html:root .sp-task-card-selection[aria-pressed='true'] i { color: inherit; }
+html:root .sp-task-card-selection[aria-pressed='true']:hover { background: var(--sp-accent); }
+html:root :is(.sp-button-primary, .sp-button-secondary) { min-height: 36px; border-radius: 10px; font-size: 13px; font-weight: 600; letter-spacing: 0; transition: background .15s, border-color .15s; }
+html:root .sp-button-primary { background: var(--sp-primary); color: var(--sp-primary-text); border-color: var(--sp-primary); }
+html:root .sp-button-primary:hover { background: var(--sp-primary-hover); }
+html:root .sp-button-secondary { background: var(--sp-surface); color: var(--sp-secondary); border-color: var(--sp-control-border); }
+html:root .sp-button-secondary:hover { background: var(--sp-hover); }
+html:root .sp-icon-button { width: 36px; height: 36px; border-radius: 10px; color: var(--sp-secondary); border-color: var(--sp-border); }
+html:root .sp-icon-button:hover { background: var(--sp-hover); color: var(--sp-text); }
+html:root .sp-account-control { min-height: 36px; background: var(--sp-raised); color: var(--sp-secondary); border-color: var(--sp-border); border-radius: 10px; }
+html:root .sp-popover { background: var(--sp-glass); border-color: var(--sp-border); border-radius: 14px; box-shadow: var(--sp-shadow); backdrop-filter: blur(20px); }
+html:root .sp-menu-item { color: var(--sp-secondary); border-radius: 8px; }
+html:root .sp-menu-item:hover { background: var(--sp-hover); color: var(--sp-text); }
+html:root .sp-menu-item.text-rose-600 { color: #be123c; }
+html[data-theme='dark'] .sp-menu-item.text-rose-600 { color: #ffb2bd; }
+html:root .sp-auth-shell { background: radial-gradient(ellipse at 50% 0%, var(--sp-raised), transparent 70%), var(--sp-canvas); }
+html:root .sp-auth-panel { background: var(--sp-glass); border-color: var(--sp-border); border-radius: 24px; box-shadow: var(--sp-shadow); }
+html:root .sp-auth-input { background: var(--sp-raised); color: var(--sp-text); border-color: var(--sp-control-border); border-radius: 10px; }
+html:root .sp-modal-backdrop { background: var(--sp-backdrop); backdrop-filter: blur(12px); }
+html:root .sp-dialog { background: linear-gradient(rgb(255 255 255 / 3%), transparent 140px), var(--sp-glass); color: var(--sp-text); border-color: var(--sp-border); border-radius: 22px; box-shadow: var(--sp-modal-shadow); backdrop-filter: blur(24px); }
+html:root .sp-dialog-header { background: transparent; color: var(--sp-text); border-bottom: 1px solid var(--sp-border); }
+html:root .sp-dialog :is(input:not([type='checkbox']):not([type='radio']), textarea, select) { background: var(--sp-raised); color: var(--sp-text); border-color: var(--sp-control-border); }
+html:root .sp-dialog :is(input, textarea, select):focus { border-color: var(--sp-focus); }
+html:root .sp-dialog [aria-invalid='true'] { border-color: #be123c; }
+html[data-theme='dark'] .sp-dialog [aria-invalid='true'] { border-color: #ffb2bd; }
+html:root .sp-dialog :is(h2, h3) { font-weight: 650; }
+html:root .sp-timeline-card { box-shadow: 0 4px 16px -8px rgb(20 25 38 / 22%); border-color: var(--sp-control-border); }
+html:root .sp-timeline-card[data-level='1'] { background: #252b38; color: #eff1f5; border-color: #515a6e; }
+html:root .sp-timeline-card[data-level='2'] { background: var(--sp-accent-soft); color: var(--sp-text); border-color: #afa3df; }
+html:root .sp-timeline-card[data-level='3'] { background: var(--sp-surface); color: var(--sp-text); border-color: var(--sp-control-border); }
+html:root .sp-timeline-card[data-selected='true'] { background: var(--sp-accent-soft); border-color: var(--sp-focus); --tw-ring-color: var(--sp-focus); }
+html:root .sp-timeline-card .sp-card-title { color: var(--sp-text); font-weight: 600; }
+html:root .sp-timeline-card .sp-card-date { color: var(--sp-muted); opacity: 1; }
+html:root .sp-timeline-card .sp-card-summary { color: var(--sp-secondary); }
+html:root .sp-timeline-card[data-level='1']:not([data-selected='true']) .sp-card-title { color: #eff1f5; }
+html:root .sp-timeline-card[data-level='1']:not([data-selected='true']) .sp-card-date { color: #e4bc62; }
+html:root .sp-timeline-card[data-level='1']:not([data-selected='true']) .sp-card-summary { color: #c1c6d0; }
+html[data-theme='dark'] .sp-timeline-card[data-level='1'] { background: #2b2e35; border-color: #7f7251; }
+html[data-theme='dark'] .sp-timeline-card[data-level='2'] { border-color: #8277b5; }
+html[data-theme='dark'] .sp-timeline-card[data-selected='true'] { background: var(--sp-accent-soft); border-color: var(--sp-focus); }
+html:root .sp-timeline-card button:focus-visible { opacity: 1; }
+html:root .sp-timeline-toolbar { background: var(--sp-glass); border-color: var(--sp-border); box-shadow: var(--sp-shadow); }
+html:root .sp-timeline-shell, html:root .sp-timeline-shell :is([data-capture-wrapper], [data-inner-container]) { background-color: var(--sp-canvas); }
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--sp-control-border); border: 2px solid var(--sp-surface); border-radius: 8px; }
+@media (prefers-reduced-motion: reduce) {
+  :is(.sp-task-card, .sp-timeline-card, .sp-dialog, .sp-button-primary, .sp-button-secondary) { transition: none; animation: none; }
+}
+
+html:root .sp-side-panel { background: var(--sp-glass); border-left: 1px solid var(--sp-border); box-shadow: var(--sp-modal-shadow); backdrop-filter: blur(24px); }
+
+html:root .sp-auth-panel .sp-button-primary { min-height: 44px; font-size: 14px; }
+@media (max-width: 639px) {
+  html:root .sp-account-control > span:nth-of-type(2) { display: none; }
+  html:root .sp-timeline-toolbar { padding: 12px 16px; }
+}

@@ -73,8 +73,8 @@ const WorkspaceMembersPanel: React.FC<Props> = ({ workspaceId, workspaceName, cu
   };
 
   return (
-    <div className="fixed inset-0 z-[3000] bg-slate-950/40 backdrop-blur-sm flex justify-end" onMouseDown={onClose}>
-      <aside className="w-full max-w-xl h-full bg-white shadow-2xl flex flex-col" onMouseDown={(event) => event.stopPropagation()}>
+    <div className="sp-modal-backdrop fixed inset-0 z-[3000] bg-slate-950/40 backdrop-blur-sm flex justify-end" onMouseDown={onClose}>
+      <aside className="sp-side-panel w-full max-w-xl h-full bg-white shadow-2xl flex flex-col" onMouseDown={(event) => event.stopPropagation()}>
         <header className="px-8 py-7 border-b border-slate-100 flex items-start justify-between">
           <div>
             <p className="text-[10px] font-black uppercase tracking-[0.22em] text-indigo-500">{t('Project access')}</p>

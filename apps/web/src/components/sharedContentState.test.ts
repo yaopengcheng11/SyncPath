@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { PublicEntry } from '@syncpath/api-client';
-import { classifySharedContentError, createShareUrl, sharedEntriesToLogs, startSharedContentPolling } from './sharedContentState';
+import { classifySharedContentError, createShareUrl, parseShareRoute, receivedShareHash, sharedContentScope, sharedEntriesToLogs, startSharedContentPolling } from './sharedContentState';
 
 const entry = (id: string, projectId: string): PublicEntry => ({
   id, projectId, authorId: 'author', weekStartDate: '2026-10-05', title: `Card ${id}`,
@@ -18,6 +18,28 @@ function deferred<T>(): { promise: Promise<T>; resolve: (value: T) => void; reje
 afterEach(() => { vi.useRealTimers(); });
 
 describe('read-only sharing state', () => {
+  it('preserves external links and routes saved shares without recovering or storing their original token', () => {
+    expect(parseShareRoute('#/share/abc_123-xyz')).toEqual({ kind: 'shared', source: { kind: 'token', token: 'abc_123-xyz' } });
+    expect(parseShareRoute('#/received-shares')).toEqual({ kind: 'received-list' });
+    expect(parseShareRoute('#/received-shares/')).toEqual({ kind: 'received-list' });
+    expect(parseShareRoute(receivedShareHash('receipt-id'))).toEqual({ kind: 'shared', source: { kind: 'receipt', receiptId: 'receipt-id' } });
+    expect(parseShareRoute('')).toEqual({ kind: 'home' });
+  });
+
+  it('keeps malformed share routes behind the shared-content gate rather than treating them as the home page', () => {
+    expect(parseShareRoute('#/share/%broken')).toEqual({ kind: 'shared', source: { kind: 'token', token: '' } });
+    expect(parseShareRoute('#/received-share/')).toEqual({ kind: 'shared', source: { kind: 'receipt', receiptId: '' } });
+    expect(parseShareRoute(receivedShareHash('id/with?reserved#characters'))).toEqual({ kind: 'shared', source: { kind: 'receipt', receiptId: 'id/with?reserved#characters' } });
+  });
+
+  it('isolates content between accounts and between token and received-share entry points', () => {
+    const external = { kind: 'token', token: 'same-id' } as const;
+    const receipt = { kind: 'receipt', receiptId: 'same-id' } as const;
+    expect(sharedContentScope('alice', external)).not.toBe(sharedContentScope('bob', external));
+    expect(sharedContentScope('alice', external)).not.toBe(sharedContentScope('alice', receipt));
+    expect(sharedContentScope('alice:token', { kind: 'token', token: 'id' })).not.toBe(sharedContentScope('alice', { kind: 'token', token: 'token:id' }));
+  });
+
   it('builds a LAN URL with the deployment path and removes unrelated query parameters', () => {
     expect(createShareUrl('abc_123-xyz', 'http://192.168.1.18:5183/syncpath/?debug=1#dashboard')).toBe('http://192.168.1.18:5183/syncpath/#/share/abc_123-xyz');
     expect(createShareUrl('token', 'http://localhost:5183/')).toBe('http://localhost:5183/#/share/token');

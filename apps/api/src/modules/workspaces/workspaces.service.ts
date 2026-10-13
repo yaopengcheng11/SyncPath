@@ -139,13 +139,8 @@ export class WorkspacesService {
     return { workspace: updated, membership };
   }
 
-  /**
-   * RV-10: soft-delete a workspace. Cascade hides every project + entry
-   * (already enforced by the workspace.deletedAt checks in
-   * ProjectRolesGuard / ProjectsService.getById / EntriesService.getById).
-   * Only the workspace Owner can do this.
-   */
-  async softDelete(input: { workspaceId: string; user: User }): Promise<void> {
+  /** Permanently remove a workspace and its children. Only its Owner can do this. */
+  async delete(input: { workspaceId: string; user: User }): Promise<void> {
     const { workspace, membership } = await this.getByIdForUser(
       input.workspaceId,
       input.user
@@ -153,12 +148,23 @@ export class WorkspacesService {
     if (membership.role !== 'Owner') {
       throw new ForbiddenException({
         code: 'owner_required',
-        message: 'Only the workspace Owner can archive this workspace.'
+        message: 'Only the workspace Owner can permanently delete this workspace.'
       });
     }
-    await this.prisma.workspace.update({
-      where: { id: workspace.id },
-      data: { deletedAt: new Date() }
+    await this.prisma.$transaction(async (tx) => {
+      const targets = await tx.$queryRaw<Array<{ id: string }>>`
+        SELECT id FROM workspaces WHERE id = ${workspace.id} AND deleted_at IS NULL FOR UPDATE
+      `;
+      if (targets.length === 0) {
+        throw new NotFoundException({ code: 'workspace_not_found', message: 'Workspace not found or inaccessible.' });
+      }
+      // Lock the links before removing receipts so a concurrent open cannot
+      // leave a metadata copy behind through ReceivedShare's SET NULL FK.
+      const links = await tx.$queryRaw<Array<{ id: string }>>`
+        SELECT id FROM share_links WHERE workspace_id = ${workspace.id} ORDER BY id FOR UPDATE
+      `;
+      await tx.receivedShare.deleteMany({ where: { linkId: { in: links.map((link) => link.id) } } });
+      await tx.workspace.delete({ where: { id: workspace.id } });
     });
   }
 }

@@ -121,7 +121,7 @@ export class EntryActionsController {
 
   @Delete(':id')
   @ApiOperation({
-    summary: 'Soft-delete a progress entry (revision-checked via expectedRevision).'
+    summary: 'Permanently delete a progress entry and its history content (revision-checked via expectedRevision).'
   })
   @ApiQuery({
     name: 'expectedRevision',
@@ -146,7 +146,7 @@ export class EntryActionsController {
         message: 'expectedRevision must be an integer.'
       });
     }
-    await this.entries.softDelete({ entry, expectedRevision: parsed });
+    await this.entries.delete({ entry, user, expectedRevision: parsed });
     this.collaboration.publish({ projectId: entry.projectId, type: 'entry.deleted', actor: user, data: { entryId: entry.id } });
   }
 }

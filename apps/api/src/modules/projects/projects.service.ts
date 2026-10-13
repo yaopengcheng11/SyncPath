@@ -1,4 +1,5 @@
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   Injectable,
@@ -12,6 +13,7 @@ import {
   newProjectMemberId
 } from '@syncpath/domain';
 import { parseSafeDate } from '../../common/dates';
+import { TimelineHistoryService } from '../timeline-history/timeline-history.service';
 
 export interface ProjectListItem {
   project: Project;
@@ -20,7 +22,7 @@ export interface ProjectListItem {
 
 @Injectable()
 export class ProjectsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(private readonly prisma: PrismaService, private readonly history: TimelineHistoryService) {}
 
   /**
    * List projects in a workspace the user can see. The "visible" set is:
@@ -260,12 +262,18 @@ export class ProjectsService {
       startDate: string;
       endDate: string;
       visibility: 'private' | 'workspace';
-      status: 'active' | 'archived';
+      status: 'active';
       color: string;
       holidayRegion: 'CN' | 'US' | 'NONE';
     }>;
   }): Promise<Project> {
     await this.assertCanWrite({ project: input.project, user: input.user, required: ['Lead', 'Editor'] });
+    if (input.changes.status !== undefined && input.changes.status !== 'active') {
+      throw new BadRequestException({
+        code: 'unsupported_project_status',
+        message: 'Archiving is no longer supported. Permanently delete the task instead.'
+      });
+    }
     if (input.expectedRevision !== input.project.revision) {
       throw new ConflictException({
         code: 'revision_conflict',
@@ -315,35 +323,45 @@ export class ProjectsService {
     // Atomic CAS update (RV-08): the WHERE clause includes the expected
     // revision, so two concurrent writers cannot both succeed — the
     // second one's affected-rows count is 0 and we surface 409.
-    const result = await this.prisma.project.updateMany({
-      where: {
-        id: input.project.id,
-        revision: input.project.revision,
-        deletedAt: null
-      },
-      data
-    });
-    if (result.count === 0) {
-      throw new ConflictException({
-        code: 'revision_conflict',
-        message: `expectedRevision ${input.expectedRevision} no longer matches current revision.`
+    return this.prisma.$transaction(async (tx) => {
+      const context = await this.history.begin(tx, input.project.id);
+      const result = await tx.project.updateMany({
+        where: {
+          id: input.project.id,
+          revision: input.project.revision,
+          deletedAt: null
+        },
+        data
       });
-    }
-    const refreshed = await this.prisma.project.findUniqueOrThrow({
-      where: { id: input.project.id }
+      if (result.count === 0) {
+        throw new ConflictException({
+          code: 'revision_conflict',
+          message: `expectedRevision ${input.expectedRevision} no longer matches current revision.`
+        });
+      }
+      await this.history.record(tx, context, input.user, 'project.updated');
+      return tx.project.findUniqueOrThrow({ where: { id: input.project.id } });
     });
-    return refreshed;
   }
 
-  async softDelete(input: { project: Project; user: User }): Promise<void> {
+  async delete(input: { project: Project; user: User }): Promise<void> {
     await this.assertCanWrite({
       project: input.project,
       user: input.user,
       required: ['Lead']
     });
-    await this.prisma.project.update({
-      where: { id: input.project.id },
-      data: { deletedAt: new Date(), status: 'archived' }
+    await this.prisma.$transaction(async (tx) => {
+      await this.history.lock(tx, input.project.id);
+      const links = await tx.$queryRaw<Array<{ id: string }>>`
+        SELECT id FROM share_links WHERE project_id = ${input.project.id} ORDER BY id FOR UPDATE
+      `;
+      await tx.receivedShare.deleteMany({ where: { linkId: { in: links.map((link) => link.id) } } });
+      const result = await tx.project.deleteMany({
+        where: { id: input.project.id, revision: input.project.revision, deletedAt: null }
+      });
+      if (result.count === 0) {
+        throw new ConflictException({ code: 'revision_conflict', message: 'The task changed while you were reviewing it.' });
+      }
     });
   }
 }

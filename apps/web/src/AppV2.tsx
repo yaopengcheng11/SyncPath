@@ -15,12 +15,16 @@ import ProjectSettingsPanel from './components/ProjectSettingsPanel';
 import WorkspaceMembersPanel from './components/WorkspaceMembersPanel';
 import WorkspaceSettingsPanel from './components/WorkspaceSettingsPanel';
 import AppDialog, { type AppDialogTone } from './components/AppDialog';
-import MentionInbox from './components/MentionInbox';
+import HeaderActions from './components/HeaderActions';
 import ProjectFormDialog, { type ProjectDraft } from './components/ProjectFormDialog';
-import ShareDialog from './components/ShareDialog';
+import ShareDialog, { type ShareTarget } from './components/ShareDialog';
 import SharedContentView from './components/SharedContentView';
+import ReceivedSharesView from './components/ReceivedSharesView';
+import TimelineHistoryPanel from './components/TimelineHistoryPanel';
+import MentionsTimelineView from './components/MentionsTimelineView';
+import { parseShareRoute, receivedShareHash } from './components/sharedContentState';
 import { apiClient, ApiError } from './services/api';
-import { LanguageSwitcher, useI18n } from './i18n';
+import { useI18n } from './i18n';
 import type {
   PublicEntry,
   PublicProject,
@@ -29,47 +33,22 @@ import type {
 } from '@syncpath/api-client';
 import { useApiData } from './hooks/useApiData';
 import { useProjectCollaboration } from './hooks/useProjectCollaboration';
+import { useMentionInbox } from './hooks/useMentionInbox';
+import { useThemePreference } from './hooks/useThemePreference';
 import type { WorkLog } from './types';
 import { entryDraftToChanges } from './utils/entryDraft';
-import { type ClipboardCard } from './utils/cardClipboard';
-import type { LogLevel } from './types';
-
-/** A card snapshot rich enough to recreate it after an undo of a delete. */
-interface UndoCard {
-  title: string;
-  level: LogLevel;
-  weekStartDate: string;
-  summary?: string;
-  notes?: string;
-  status?: 'pending' | 'completed';
-  mentionAll?: boolean;
-  mentionedUserIds?: string[];
-}
+import { cardClipboard, type ClipboardCard } from './utils/cardClipboard';
 
 type UndoEntry =
   | { kind: 'move'; items: { id: string; title: string; oldDate: string; newDate: string }[] }
-  | { kind: 'delete'; items: UndoCard[] }
   | { kind: 'paste'; items: { id: string; title: string }[] };
 
 /** Keep the stack shallow — undoing across a long session is not a real workflow. */
 const UNDO_LIMIT = 20;
 
-function toUndoCard(entry: PublicEntry): UndoCard {
-  return {
-    title: entry.title,
-    level: entry.level === 'primary' ? 1 : entry.level === 'secondary' ? 2 : 3,
-    weekStartDate: entry.weekStartDate,
-    summary: entry.summary ?? undefined,
-    notes: entry.notes ?? undefined,
-    status: entry.status,
-    mentionAll: entry.mentionAll,
-    mentionedUserIds: entry.mentionedUserIds
-  };
-}
-
 const PROJECT_COLORS = ['#6366f1', '#ec4899', '#8b5cf6', '#10b981', '#f59e0b', '#3b82f6'];
 
-type View = 'dashboard' | 'project-form' | 'timeline' | 'multi-timeline' | 'editor';
+type View = 'dashboard' | 'project-form' | 'timeline' | 'multi-timeline' | 'editor' | 'mentions-timeline';
 
 function apiUserToAppUser(user: PublicUser): {
   id: string;
@@ -152,11 +131,22 @@ function entriesToLogsByWeek(entries: PublicEntry[]): Record<string, WorkLog[]> 
  * transitioned from undefined → null → PublicUser; RV-03).
  */
 const AppV2: React.FC = () => {
+  useThemePreference();
   const api = useApiData();
-  const [shareToken, setShareToken] = useState(() => readShareToken());
+  const [shareRoute, setShareRoute] = useState(() => parseShareRoute(window.location.hash));
+  const [expiredUserId, setExpiredUserId] = useState<string | null>(null);
+
+  const navigate = useCallback((hash: string): void => {
+    window.location.hash = hash;
+    setShareRoute(parseShareRoute(hash));
+  }, []);
+  const expireSession = useCallback((): void => {
+    if (api.user) setExpiredUserId(api.user.id);
+    api.invalidateSession();
+  }, [api.user, api.invalidateSession]);
 
   useEffect(() => {
-    const update = (): void => setShareToken(readShareToken());
+    const update = (): void => setShareRoute(parseShareRoute(window.location.hash));
     window.addEventListener('hashchange', update);
     return () => window.removeEventListener('hashchange', update);
   }, []);
@@ -164,50 +154,57 @@ const AppV2: React.FC = () => {
   if (api.user === undefined) {
     return <LoadingScreen />;
   }
-  if (api.user === null) {
+  if (api.user === null || api.user.id === expiredUserId) {
+    const externalShare = shareRoute.kind === 'shared' && shareRoute.source.kind === 'token';
     return (
       <AuthScreen
-        key={shareToken !== null ? 'share-auth' : 'normal-auth'}
-        initialMode={shareToken !== null ? 'signup' : 'login'}
-        sharedAccess={shareToken !== null}
+        key={shareRoute.kind !== 'home' ? 'share-auth' : 'normal-auth'}
+        initialMode={externalShare && expiredUserId === null ? 'signup' : 'login'}
+        sharedAccess={shareRoute.kind !== 'home'}
         onAuthSuccess={async () => {
           // The cookie was set by the AuthScreen's POST; probe /me to
           // capture the real PublicUser and load workspaces.
           const session = await apiClient.me();
           await api.signIn(session.user);
+          setExpiredUserId(null);
         }}
       />
     );
   }
 
-  if (shareToken !== null) {
+  if (shareRoute.kind === 'shared') {
+    const source = shareRoute.source;
     return (
       <SharedContentView
-        key={`${api.user.id}:${shareToken}`}
-        token={shareToken}
+        key={JSON.stringify([api.user.id, source])}
+        source={source}
         user={api.user}
-        onExit={() => {
-          window.history.replaceState(null, '', window.location.pathname + window.location.search);
-          setShareToken(null);
-        }}
+        onExit={() => navigate('#/received-shares')}
         onSignOut={api.signOut}
+        onSessionExpired={expireSession}
       />
     );
   }
 
-  return <AppMain api={api} user={api.user} />;
-};
+  if (shareRoute.kind === 'received-list') {
+    return <ReceivedSharesView
+      key={api.user.id}
+      user={api.user}
+      onOpenReceipt={(id) => navigate(receivedShareHash(id))}
+      onExit={() => navigate('')}
+      onSignOut={api.signOut}
+      onSessionExpired={expireSession}
+    />;
+  }
 
-function readShareToken(): string | null {
-  const prefix = '#/share/';
-  return window.location.hash.startsWith(prefix) ? window.location.hash.slice(prefix.length) : null;
-}
+  return <AppMain key={api.user.id} api={api} user={api.user} onOpenReceivedShares={() => navigate('#/received-shares')} />;
+};
 
 const LoadingScreen: React.FC = () => {
   const { t } = useI18n();
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-50">
-      <div className="text-slate-400 text-sm font-bold uppercase tracking-widest animate-pulse">
+    <div className="sp-app-shell min-h-screen flex items-center justify-center">
+      <div className="sp-metadata text-sm animate-pulse">
         {t('Loading…')}
       </div>
     </div>
@@ -221,8 +218,10 @@ const LoadingScreen: React.FC = () => {
 const AppMain: React.FC<{
   api: ReturnType<typeof useApiData>;
   user: PublicUser;
-}> = ({ api, user }) => {
+  onOpenReceivedShares: () => void;
+}> = ({ api, user, onOpenReceivedShares }) => {
   const { t } = useI18n();
+  const mentionInbox = useMentionInbox(user.id, api.invalidateSession);
   const [view, setView] = useState<View>('dashboard');
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
   const [selectedMultiIds, setSelectedMultiIds] = useState<string[]>([]);
@@ -231,14 +230,14 @@ const AppMain: React.FC<{
   const [activeLogLevel, setActiveLogLevel] = useState<1 | 2 | 3>(3);
   const [showMembers, setShowMembers] = useState(false);
   const [showProjectSettings, setShowProjectSettings] = useState(false);
+  const [showTimelineHistory, setShowTimelineHistory] = useState(false);
   const [showWorkspaceMembers, setShowWorkspaceMembers] = useState(false);
-  const [shareTarget, setShareTarget] = useState<{ kind: 'workspace' | 'project'; id: string; name: string } | null>(null);
+  const [shareTarget, setShareTarget] = useState<ShareTarget | null>(null);
   const [showWorkspaceForm, setShowWorkspaceForm] = useState(false);
   const [workspaceName, setWorkspaceName] = useState('');
   const [workspaceError, setWorkspaceError] = useState<string | null>(null);
   const [creatingWorkspace, setCreatingWorkspace] = useState(false);
   const [workspaceSettingsId, setWorkspaceSettingsId] = useState<string | null>(null);
-  const [pendingProjectDelete, setPendingProjectDelete] = useState<PublicProject | null>(null);
   // Carries its own tone and title: the same channel reports hard failures and
   // routine confirmations (locking a card is a success, not a red alert).
   const [timelineMessage, setTimelineMessage] = useState<{
@@ -406,10 +405,16 @@ const AppMain: React.FC<{
     setView('timeline');
   }, [activeWorkspace, selectedWorkspaceId, api, projects.length, t]);
 
-  const handleDeleteProject = useCallback((projectId: string) => {
-    const project = projects.find((item) => item.id === projectId);
-    if (project) setPendingProjectDelete(project);
-  }, [projects]);
+  const handleDeleteTask = useCallback(async (projectId: string) => {
+    await api.deleteProject(projectId);
+    cardClipboard.clear();
+    setSelectedMultiIds((ids) => ids.filter((id) => id !== projectId));
+    if (selectedProjectId === projectId) {
+      setSelectedProjectId(null);
+      setView('dashboard');
+      setShowTimelineHistory(false);
+    }
+  }, [api, selectedProjectId]);
 
   // Persist project settings. On a 409 the panel needs the freshest copy to
   // show side by side, so re-read it here before letting the error through.
@@ -436,28 +441,10 @@ const AppMain: React.FC<{
     }
   }, [api, activeWorkspace]);
 
-  const confirmDeleteProject = useCallback(async () => {
-    if (!pendingProjectDelete) return;
-    const projectId = pendingProjectDelete.id;
-    try {
-      await api.deleteProject(projectId);
-      setPendingProjectDelete(null);
-      if (selectedProjectId === projectId) {
-        setSelectedProjectId(null);
-        setView('dashboard');
-      }
-    } catch (err) {
-      setPendingProjectDelete(null);
-      setSystemMessage({
-        title: t('Unable to delete task'),
-        message: err instanceof Error ? err.message : t('Please try again.'),
-        type: 'error'
-      });
-    }
-  }, [api, pendingProjectDelete, selectedProjectId, t]);
 
-  const handleWorkspaceArchived = useCallback(
+  const handleWorkspaceDeleted = useCallback(
     (workspaceId: string) => {
+      cardClipboard.clear();
       setWorkspaceSettingsId(null);
       setShowWorkspaceMembers(false);
       if (selectedWorkspaceId === workspaceId) {
@@ -471,6 +458,7 @@ const AppMain: React.FC<{
   );
 
   const handleSelectProject = useCallback((id: string) => {
+    setShowTimelineHistory(false);
     setSelectedProjectId(id);
     setView('timeline');
   }, []);
@@ -515,10 +503,10 @@ const AppMain: React.FC<{
   );
 
   // ── Undo ────────────────────────────────────────────────────────────────
-  // A bounded in-memory stack for the operations you actually regret: moving
-  // cards, deleting them, and pasting copies. Text edits are deliberately not
-  // here — the card editor's own inputs keep the browser's native Ctrl+Z.
+  // Moving cards and pasting copies can be undone. Permanent deletion clears
+  // the stack; text inputs keep the browser's native Ctrl+Z.
   const undoStack = useRef<UndoEntry[]>([]);
+  useEffect(() => { undoStack.current = []; }, [selectedProjectId]);
   const pushUndo = useCallback((entry: UndoEntry) => {
     const next = [...undoStack.current, entry];
     undoStack.current = next.slice(-UNDO_LIMIT);
@@ -602,28 +590,7 @@ const AppMain: React.FC<{
       return t('Undid move of {{count}} cards', { count: entry.items.length });
     }
 
-    // delete: the rows are soft-deleted, so restore by recreating them. The
-    // restored cards get fresh ids — the originals stay in the audit trail.
-    void (async () => {
-      for (const card of entry.items) {
-        try {
-          await api.createEntry(projectId, {
-            weekStartDate: card.weekStartDate,
-            title: card.title,
-            level: card.level === 1 ? 'primary' : card.level === 2 ? 'secondary' : 'minor',
-            summary: card.summary,
-            notes: card.notes,
-            mentionAll: card.mentionAll ?? false,
-            mentionedUserIds: card.mentionedUserIds ?? [],
-            status: card.status ?? 'pending'
-          });
-        } catch {
-          /* leave it out; the next refresh reflects reality */
-        }
-      }
-      await api.refreshEntries(projectId).catch(() => undefined);
-    })();
-    return t('Restored {{count}} cards', { count: entry.items.length });
+    return null;
   }, [api, selectedProjectId, t]);
 
   const handleMoveLogs = useCallback(async (moves: { id: string; oldDate: string; newDate: string }[]) => {
@@ -683,13 +650,12 @@ const AppMain: React.FC<{
       (api.entries[selectedProjectId] ?? []).map((entry) => [entry.id, entry] as const)
     );
     const failed: { id: string; conflict: boolean }[] = [];
-    const removed: UndoCard[] = [];
     let deleted = 0;
     for (const id of ids) {
       try {
         await api.deleteEntry(selectedProjectId, id, known.get(id)?.revision);
-        const entry = known.get(id);
-        if (entry) removed.push(toUndoCard(entry));
+        undoStack.current = [];
+        cardClipboard.clear();
         deleted += 1;
       } catch (err) {
         failed.push({
@@ -698,7 +664,6 @@ const AppMain: React.FC<{
         });
       }
     }
-    if (removed.length > 0) pushUndo({ kind: 'delete', items: removed });
     if (failed.length === 0) return;
     await api.refreshEntries(selectedProjectId).catch(() => undefined);
     const total = deleted + failed.length;
@@ -795,7 +760,91 @@ const AppMain: React.FC<{
     }
   }, [api, t]);
 
+  const handleOpenMentionEntry = useCallback(async (item: import('@syncpath/api-client').MentionTimelineItem) => {
+    try {
+      const visibleProjects = await api.refreshProjects(item.workspace.id);
+      if (!visibleProjects.some((project) => project.id === item.project.id)) throw new Error(t('This task is no longer available.'));
+      const entries = await api.refreshEntries(item.project.id);
+      if (!entries.some((entry) => entry.id === item.entry.id)) throw new Error(t('This card is no longer available.'));
+      setSelectedWorkspaceId(item.workspace.id);
+      setSelectedProjectId(item.project.id);
+      setActiveLogDate(item.entry.weekStartDate);
+      setActiveLogId(item.entry.id);
+      setActiveLogLevel(item.entry.level === 'primary' ? 1 : item.entry.level === 'secondary' ? 2 : 3);
+      setShowTimelineHistory(false);
+      setView('editor');
+    } catch (error) {
+      setSystemMessage({ title: t('Unable to open mention'), message: error instanceof Error ? error.message : t('Please try again.'), type: 'warning' });
+    }
+  }, [api, t]);
+
   // ─── Render ────────────────────────────────────────────────────────
+
+  const taskContext = (view === 'timeline' || view === 'editor') ? activeProject : undefined;
+  const headerWorkspace = taskContext
+    ? activeWorkspace
+    : workspaces.find((workspace) => workspace.id === selectedWorkspaceId);
+  const canManageHeaderWorkspace = headerWorkspace?.role === 'Owner' || headerWorkspace?.role === 'Admin';
+  const shareTargets: ShareTarget[] = [];
+  if (headerWorkspace && canManageHeaderWorkspace) {
+    shareTargets.push({ kind: 'workspace', id: headerWorkspace.id, name: headerWorkspace.name });
+  }
+  if (taskContext && (taskContext.myRole === 'Lead' || canManageHeaderWorkspace)) {
+    shareTargets.push({ kind: 'project', id: taskContext.id, name: taskContext.name });
+  }
+  const headerActions = <HeaderActions
+    key="header-actions"
+    user={user}
+    inbox={mentionInbox}
+    onOpenMention={handleOpenMention}
+    onOpenReceivedShares={onOpenReceivedShares}
+    onOpenMentionsTimeline={() => { setShowTimelineHistory(false); setView('mentions-timeline'); }}
+    onSignOut={() => { void handleLogout(); }}
+    onShare={shareTargets.length ? () => setShareTarget(shareTargets[shareTargets.length - 1]) : undefined}
+    presence={taskContext ? <ProjectPresence
+      key={taskContext.id}
+      collaborators={collaboration.collaborators}
+      connected={collaboration.connected}
+      currentUser={user}
+      currentAction={collaboration.selfPresence.action}
+      currentTargetId={collaboration.selfPresence.targetId}
+      entryTitles={entryTitles}
+    /> : undefined}
+  />;
+  const workspacePanels = <>
+    {showWorkspaceMembers && headerWorkspace && <WorkspaceMembersPanel
+      key={headerWorkspace.id}
+      workspaceId={headerWorkspace.id}
+      workspaceName={headerWorkspace.name}
+      currentUserId={user.id}
+      canManage={canManageHeaderWorkspace}
+      onClose={() => setShowWorkspaceMembers(false)}
+    />}
+    {settingsWorkspace && <WorkspaceSettingsPanel
+      key={settingsWorkspace.id}
+      workspace={settingsWorkspace}
+      tasks={api.projects[settingsWorkspace.id] ?? []}
+      onDeleteTask={handleDeleteTask}
+      onClose={() => setWorkspaceSettingsId(null)}
+      onManageMembers={() => { setWorkspaceSettingsId(null); setShowWorkspaceMembers(true); }}
+      renameWorkspace={(name) => api.updateWorkspace(settingsWorkspace.id, { name })}
+      deleteWorkspace={() => api.deleteWorkspace(settingsWorkspace.id)}
+      onUpdated={() => setWorkspaceSettingsId(null)}
+      onDeleted={() => handleWorkspaceDeleted(settingsWorkspace.id)}
+    />}
+  </>;
+
+  if (view === 'mentions-timeline') return <div className="sp-app-shell flex h-screen flex-col overflow-hidden">
+    <header className="sp-topbar relative z-[100] flex shrink-0 flex-wrap items-center gap-3 border-b px-5 py-3 sm:px-8">
+      <button type="button" onClick={() => setView('dashboard')} aria-label={t('Back to my projects')} className="sp-icon-button"><i className="fas fa-arrow-left" aria-hidden="true" /></button>
+      <span className="sp-heading text-sm font-semibold">SyncPath</span>
+      {headerActions}
+    </header>
+    <MentionsTimelineView userId={user.id} onOpenEntry={(item) => void handleOpenMentionEntry(item)} onSessionExpired={api.invalidateSession} />
+    <AppDialog open={systemMessage !== null} title={systemMessage?.title ?? ''} message={systemMessage?.message} tone="warning" cancelLabel={t('Close')} onCancel={() => setSystemMessage(null)} />
+    {workspacePanels}
+    {shareTarget && <ShareDialog target={shareTarget} targets={shareTargets} onClose={() => setShareTarget(null)} />}
+  </div>;
 
   if (view === 'multi-timeline' && appUser !== null) {
     const _ = appUser;
@@ -822,66 +871,31 @@ const AppMain: React.FC<{
     const canManageMembers = activeProject.myRole === 'Lead' || activeWorkspace?.role === 'Owner' || activeWorkspace?.role === 'Admin';
     const canEditCards = activeProject.myRole === 'Lead' || activeProject.myRole === 'Editor' || activeWorkspace?.role === 'Owner' || activeWorkspace?.role === 'Admin';
     return (
-      <div className="flex flex-col h-screen bg-slate-50 overflow-hidden">
-        <header className="relative z-[100] px-4 sm:px-8 lg:px-12 py-4 border-b border-slate-200 bg-white shadow-sm flex flex-wrap gap-3 items-center justify-between shrink-0">
-          <div className="flex items-center gap-4">
-            <MentionInbox onOpen={handleOpenMention} align="left" />
+      <div className="sp-app-shell flex flex-col h-screen overflow-hidden">
+        <header className="sp-topbar relative z-[100] px-4 sm:px-8 lg:px-10 py-3 border-b flex flex-wrap gap-3 items-center justify-between shrink-0">
+          <div className="flex min-w-0 items-center gap-3">
             <button
               onClick={() => setView('dashboard')}
               aria-label={t('Back to tasks')}
               title={t('Back to tasks')}
-              className="w-10 h-10 bg-slate-100 hover:bg-slate-200 rounded-xl flex items-center justify-center text-slate-500 transition-all"
+              className="sp-icon-button"
             >
-              <i className="fas fa-arrow-left"></i>
+              <i className="fas fa-arrow-left" aria-hidden="true"></i>
             </button>
-            <div>
-              <p className="max-w-[40vw] truncate text-[10px] font-bold text-slate-500 tracking-wide">
-                {activeWorkspace?.name} <span aria-hidden="true">›</span> {activeProject.name}
-              </p>
-              <h2 className="max-w-[40vw] truncate text-xl sm:text-2xl font-black text-slate-800 tracking-tight">
-                {activeProject.name}
-              </h2>
-              <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                {activeProject.startDate} → {activeProject.endDate}
+            <div className="min-w-0">
+              <div className="flex items-center gap-2 text-xs text-slate-500">
+                <button type="button" onClick={() => { setSelectedWorkspaceId(activeProject.workspaceId); setWorkspaceSettingsId(activeProject.workspaceId); }} className="max-w-[22vw] truncate rounded-md py-1 hover:text-indigo-600" title={t('Project settings')}>{activeWorkspace?.name}</button>
+                <span className="text-slate-300" aria-hidden="true">/</span>
+                <h2 className="sp-heading max-w-[28vw] truncate text-sm font-semibold">{activeProject.name}</h2>
+                <button type="button" onClick={() => setShowProjectSettings(true)} aria-label={t('Task settings')} title={t('Task settings')} className="sp-icon-button"><i className="fas fa-sliders-h text-xs" aria-hidden="true" /></button>
+                {canManageMembers && <button type="button" onClick={() => setShowTimelineHistory(true)} aria-label={t('Timeline history')} title={t('Timeline history')} className="sp-icon-button"><i className="fas fa-history text-xs" aria-hidden="true" /></button>}
+              </div>
+              <p className="sp-metadata mt-0.5 flex items-center gap-2 text-xs">
+                <time dateTime={activeProject.startDate}>{activeProject.startDate}</time><span aria-hidden="true">—</span><time dateTime={activeProject.endDate}>{activeProject.endDate}</time>
               </p>
             </div>
           </div>
-          <div className="flex flex-wrap items-center justify-end gap-2 ml-auto">
-            {canManageMembers && <button
-              onClick={() => setShareTarget({ kind: 'project', id: activeProject.id, name: activeProject.name })}
-              className="px-4 py-2 rounded-full border border-indigo-200 text-[10px] font-black uppercase tracking-widest hover:bg-indigo-50 transition-colors flex items-center gap-2 text-indigo-600"
-            ><i className="fas fa-share-alt" />{t('Share Task')}</button>}
-            <button
-              onClick={() => setShowProjectSettings(true)}
-              className="px-4 py-2 rounded-full border border-slate-200 text-[10px] font-black uppercase tracking-widest hover:bg-indigo-50 hover:border-indigo-200 hover:text-indigo-600 transition-colors flex items-center gap-2 text-slate-500"
-            >
-              <i className="fas fa-sliders-h"></i>
-              {t('Settings')}
-            </button>
-            <button
-              onClick={() => setShowMembers(true)}
-              className="px-4 py-2 rounded-full border border-slate-200 text-[10px] font-black uppercase tracking-widest hover:bg-indigo-50 hover:border-indigo-200 hover:text-indigo-600 transition-colors flex items-center gap-2 text-slate-500"
-            >
-              <i className="fas fa-users"></i>
-              {t('Members')}
-            </button>
-            <ProjectPresence
-              key={activeProject.id}
-              collaborators={collaboration.collaborators}
-              connected={collaboration.connected}
-              currentUser={user}
-              currentAction={collaboration.selfPresence.action}
-              currentTargetId={collaboration.selfPresence.targetId}
-              entryTitles={entryTitles}
-            />
-            <button
-              onClick={handleLogout}
-              className="px-4 py-2 rounded-full border border-slate-200 text-[10px] font-black uppercase tracking-widest hover:bg-slate-50 transition-colors flex items-center gap-2 text-slate-500"
-            >
-              {t('Sign out')}
-            </button>
-            <LanguageSwitcher compact />
-          </div>
+          {headerActions}
         </header>
         <div className={`flex-1 overflow-hidden ${view === 'editor' ? 'pointer-events-none' : ''}`}>
           <Timeline
@@ -930,6 +944,7 @@ const AppMain: React.FC<{
             project={activeProject}
             canEdit={canEditCards}
             onSave={handleSaveProjectSettings}
+            onManageMembers={() => { setShowProjectSettings(false); setShowMembers(true); }}
             onClose={() => setShowProjectSettings(false)}
           />
         )}
@@ -944,7 +959,9 @@ const AppMain: React.FC<{
             onClose={() => setShowMembers(false)}
           />
         )}
-        {shareTarget && <ShareDialog target={shareTarget} onClose={() => setShareTarget(null)} />}
+        {workspacePanels}
+        {showTimelineHistory && canManageMembers && <TimelineHistoryPanel key={activeProject.id} projectId={activeProject.id} userId={user.id} onClose={() => setShowTimelineHistory(false)} onSessionExpired={api.invalidateSession} />}
+        {shareTarget && <ShareDialog target={shareTarget} targets={shareTargets} onClose={() => setShareTarget(null)} />}
         <AppDialog
           open={timelineMessage !== null}
           tone={timelineMessage?.tone ?? 'info'}
@@ -967,48 +984,27 @@ const AppMain: React.FC<{
 
   // Dashboard + project form.
   return (
-    <div className="min-h-screen flex flex-col bg-white">
+    <div className="sp-app-shell min-h-screen flex flex-col">
       {/* Top nav */}
-      <header className="relative z-50 px-5 sm:px-8 lg:px-12 py-6 border-b border-slate-50 flex items-center justify-between">
+      <header className="sp-topbar relative z-50 px-5 sm:px-8 lg:px-10 py-3 border-b flex flex-wrap gap-4 items-center justify-between">
         <div className="flex items-center gap-6">
-          <div
-            className="flex items-center gap-3 cursor-pointer"
+          <button
+            type="button"
+            className="flex items-center gap-2.5 rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
             onClick={() => {
               setView('dashboard');
               setSelectedProjectId(null);
             }}
           >
-            <div className="w-9 h-9 bg-slate-900 rounded-xl flex items-center justify-center text-white text-[12px] font-black shadow-lg shadow-slate-200">
+            <span className="sp-brand-mark flex h-9 w-9 items-center justify-center rounded-xl text-sm font-semibold" aria-hidden="true">
               S
-            </div>
-            <span className="font-black text-slate-800 tracking-tighter text-sm">
+            </span>
+            <span className="sp-heading text-[15px] font-semibold tracking-tight">
               SyncPath
             </span>
-          </div>
-          <div className="h-6 w-px bg-slate-100 hidden md:block"></div>
-          <p className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em]">
-            {t('Team planning')}
-          </p>
-        </div>
-        <div className="flex items-center gap-4">
-          <MentionInbox onOpen={handleOpenMention} />
-          <div className="flex items-center gap-2 px-3 py-1 bg-slate-50 rounded-full">
-            <div
-              className="w-2 h-2 rounded-full"
-              style={{ backgroundColor: appUser?.color ?? '#94a3b8' }}
-            ></div>
-            <span className="text-[10px] font-black uppercase tracking-widest text-slate-600">
-              {appUser?.username}
-            </span>
-          </div>
-          <button
-            onClick={handleLogout}
-            className="px-4 py-2 rounded-full border border-slate-200 text-[10px] font-black uppercase tracking-widest hover:bg-slate-50 transition-colors text-slate-500"
-          >
-            {t('Sign out')}
           </button>
-          <LanguageSwitcher compact />
         </div>
+        {headerActions}
       </header>
 
       <AppDialog
@@ -1020,50 +1016,31 @@ const AppMain: React.FC<{
         onCancel={() => setSystemMessage(null)}
       />
 
-      <AppDialog
-        open={pendingProjectDelete !== null}
-        tone="danger"
-        title={`${t('Delete')} ${pendingProjectDelete?.name ?? t('task')}?`}
-        message={t('This will hide the task and its timeline history from the project. The action can be audited, but the task will no longer be available to the team.')}
-        confirmLabel={t('Delete task')}
-        cancelLabel={t('Keep task')}
-        onConfirm={() => void confirmDeleteProject()}
-        onCancel={() => setPendingProjectDelete(null)}
-      />
 
       {/* Workspaces strip */}
-      <section className="px-5 sm:px-8 lg:px-12 py-5 border-b border-slate-50 bg-slate-50/50">
-        <div className="flex items-center justify-between mb-4">
-          <h3 className="text-[10px] font-black text-slate-400 uppercase tracking-[0.3em]">
+      <section className="sp-project-strip px-5 sm:px-8 lg:px-10 py-5 border-b">
+        <div className="flex items-center justify-between mb-3">
+          <h3 className="sp-metadata text-xs font-medium">
             {t('Projects')}
           </h3>
           <div className="flex items-center gap-2">
             <button
               onClick={() => setShowWorkspaceForm(true)}
-              className="px-4 py-2 rounded-xl border border-indigo-200 text-xs font-black text-indigo-600 hover:bg-indigo-50 transition-colors"
+              className="sp-button-secondary inline-flex items-center gap-2 px-3 text-xs font-medium"
               aria-expanded={showWorkspaceForm}
             >
-              <i className="fas fa-plus mr-2"></i>{t('New Project')}
-            </button>
-            <button
-              onClick={() => void api.refreshWorkspaces()}
-              className="w-8 h-8 rounded-lg text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 transition-colors"
-              title={t('Refresh projects')}
-              aria-label={t('Refresh projects')}
-            >
-              <i className="fas fa-sync-alt text-[11px]"></i>
+              <i className="fas fa-plus text-[10px]" aria-hidden="true"></i>{t('New Project')}
             </button>
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
           {workspaces.length === 0 && !api.loading && (
-            <p className="text-xs text-slate-400 italic">
+            <p className="sp-metadata text-xs">
               {t('No projects yet. Create one to start tracking milestones.')}
             </p>
           )}
           {workspaces.map((w) => {
             const selected = selectedWorkspaceId === w.id;
-            const canManage = w.role === 'Owner' || w.role === 'Admin';
             return (
               <div key={w.id} className="flex items-center gap-1">
                 <button
@@ -1073,53 +1050,21 @@ const AppMain: React.FC<{
                     setSelectedMultiIds([]);
                     setView('dashboard');
                   }}
-                  className={`px-4 py-2 rounded-xl text-xs font-bold border transition-all ${
-                    selected
-                      ? 'bg-slate-900 text-white border-slate-900'
-                      : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'
-                  }`}
+                  className={`sp-project-chip ${selected ? 'sp-project-chip-active' : ''} max-w-[15rem] truncate px-3.5 text-sm font-medium`}
+                  aria-pressed={selected}
+                  title={w.name}
                 >
-                  {w.name}{' '}
-                  <span
-                    className="ml-1 text-[9px] uppercase tracking-widest opacity-60"
-                    title={w.role === 'Owner' ? t('You are the owner of this project') : `${t('Your project role')}: ${t(w.role)}`}
-                  >
-                    {t(w.role)}
-                  </span>
+                  {w.name}
                 </button>
-                {selected && canManage && (
-                  <button
-                    onClick={() => {
-                      setSelectedWorkspaceId(w.id);
-                      setSelectedProjectId(null);
-                      setView('dashboard');
-                      setWorkspaceSettingsId(w.id);
-                    }}
-                    className={`w-8 h-8 rounded-lg border transition-colors ${
-                      selected
-                        ? 'border-slate-200 bg-white text-slate-500 hover:bg-slate-100'
-                        : 'border-slate-200 bg-white text-slate-400 hover:text-indigo-600 hover:border-indigo-200'
-                    }`}
-                    title={`${t('Manage project')} ${w.name}`}
-                    aria-label={`${t('Manage project')} ${w.name}`}
-                  >
-                    <i className="fas fa-cog text-[11px]"></i>
-                  </button>
-                )}
-                {selected && canManage && <button
-                  onClick={() => setShareTarget({ kind: 'workspace', id: w.id, name: w.name })}
-                  className="px-3 h-8 rounded-lg border border-indigo-200 bg-white text-xs font-bold text-indigo-600 hover:bg-indigo-50 transition-colors"
-                  title={`${t('Share Project')} ${w.name}`}
-                  aria-label={`${t('Share Project')} ${w.name}`}
-                ><i className="fas fa-share-alt mr-1" />{t('Share Project')}</button>}
+                <button type="button" aria-label={t('Project settings for {{name}}', { name: w.name })} title={t('Project settings')} onClick={() => { setSelectedWorkspaceId(w.id); setWorkspaceSettingsId(w.id); }} className="sp-icon-button"><i className="fas fa-cog text-xs" aria-hidden="true" /></button>
               </div>
             );
           })}
         </div>
         {showWorkspaceForm && (
-          <form onSubmit={handleCreateWorkspace} className="mt-4 max-w-xl rounded-2xl border border-indigo-100 bg-white p-4">
+          <form onSubmit={handleCreateWorkspace} className="sp-task-card mt-4 max-w-xl rounded-xl border p-4">
             <p className="mb-3 text-xs text-slate-500">{t('Projects organize tasks and members. You can create multiple projects.')}</p>
-            <label htmlFor="new-project-name" className="mb-2 block text-xs font-bold text-slate-700">{t('Project name')}</label>
+            <label htmlFor="new-project-name" className="mb-2 block text-xs font-medium text-slate-700">{t('Project name')}</label>
             <div className="flex flex-wrap gap-2">
               <input
                 id="new-project-name"
@@ -1132,46 +1077,23 @@ const AppMain: React.FC<{
                 disabled={creatingWorkspace}
                 aria-invalid={workspaceError ? true : undefined}
                 aria-describedby={workspaceError ? 'new-project-error' : undefined}
-                className="min-w-0 flex-1 px-4 py-2 rounded-xl border border-slate-200 outline-none focus:border-indigo-500 focus:ring-4 focus:ring-indigo-50"
+                className="sp-auth-input min-w-0 flex-1 px-3 py-2 rounded-lg border text-sm outline-none"
               />
-              <button type="submit" disabled={creatingWorkspace || !workspaceName.trim()} className="px-4 py-2 bg-slate-900 text-white rounded-xl font-black text-xs disabled:opacity-40">
+              <button type="submit" disabled={creatingWorkspace || !workspaceName.trim()} className="sp-button-primary px-4 text-sm font-medium disabled:opacity-40">
                 {creatingWorkspace ? t('Creating…') : t('Create project')}
               </button>
-              <button type="button" disabled={creatingWorkspace} onClick={() => setShowWorkspaceForm(false)} className="px-4 py-2 rounded-xl border border-slate-200 text-xs font-bold text-slate-500 disabled:opacity-40">{t('Cancel')}</button>
+              <button type="button" disabled={creatingWorkspace} onClick={() => setShowWorkspaceForm(false)} className="sp-button-secondary px-4 text-sm font-medium disabled:opacity-40">{t('Cancel')}</button>
             </div>
             {workspaceError && <p id="new-project-error" role="alert" className="mt-3 text-xs text-red-600">{workspaceError}</p>}
           </form>
         )}
       </section>
 
-      {showWorkspaceMembers && activeWorkspace && (
-        <WorkspaceMembersPanel
-          workspaceId={activeWorkspace.id}
-          workspaceName={activeWorkspace.name}
-          currentUserId={user.id}
-          canManage={activeWorkspace.role === 'Owner' || activeWorkspace.role === 'Admin'}
-          onClose={() => setShowWorkspaceMembers(false)}
-        />
-      )}
-      {shareTarget && <ShareDialog target={shareTarget} onClose={() => setShareTarget(null)} />}
-
-      {settingsWorkspace && (
-        <WorkspaceSettingsPanel
-          workspace={settingsWorkspace}
-          onClose={() => setWorkspaceSettingsId(null)}
-          onManageMembers={() => {
-            setWorkspaceSettingsId(null);
-            setShowWorkspaceMembers(true);
-          }}
-          renameWorkspace={(name) => api.updateWorkspace(settingsWorkspace.id, { name })}
-          archiveWorkspace={() => api.deleteWorkspace(settingsWorkspace.id)}
-          onUpdated={() => setWorkspaceSettingsId(null)}
-          onArchived={() => handleWorkspaceArchived(settingsWorkspace.id)}
-        />
-      )}
+      {workspacePanels}
+      {shareTarget && <ShareDialog target={shareTarget} targets={shareTargets} onClose={() => setShareTarget(null)} />}
 
       {/* Main content */}
-      <main className="flex-1 px-5 py-8 sm:px-8 lg:px-12">
+      <main className="flex-1 px-5 py-7 sm:px-8 lg:px-10">
           <Dashboard
             workspaces={workspaces}
             selectedWorkspaceId={selectedWorkspaceId}
@@ -1187,7 +1109,6 @@ const AppMain: React.FC<{
               )
             }
             onEnterMultiView={handleEnterMultiView}
-            onDeleteProject={handleDeleteProject}
             onCreateProject={() => {
               if (!selectedWorkspaceId && workspaces.length > 0) {
                 setSelectedWorkspaceId(workspaces[0].id);
@@ -1223,7 +1144,6 @@ const Dashboard: React.FC<{
   onSelectProject: (id: string) => void;
   onToggleMultiSelect: (id: string) => void;
   onEnterMultiView: () => void;
-  onDeleteProject: (id: string) => void;
   onCreateProject: () => void;
 }> = ({
   workspaces,
@@ -1233,124 +1153,113 @@ const Dashboard: React.FC<{
   onSelectProject,
   onToggleMultiSelect,
   onEnterMultiView,
-  onDeleteProject,
   onCreateProject
 }) => {
   const { t } = useI18n();
   const visibleProjects = projects;
-  const selectedWorkspace = workspaces.find((workspace) => workspace.id === selectedWorkspaceId);
 
   if (workspaces.length === 0) {
     return (
-      <div className="max-w-md mx-auto text-center py-16">
-        <div className="w-16 h-16 bg-indigo-50 text-indigo-600 rounded-2xl flex items-center justify-center text-3xl mx-auto mb-6">
-          <i className="fas fa-folder-open"></i>
+      <div className="max-w-md mx-auto text-center py-16 sm:py-20">
+        <div className="sp-brand-mark w-12 h-12 rounded-2xl flex items-center justify-center text-xl mx-auto mb-5">
+          <i className="fas fa-folder-open" aria-hidden="true"></i>
         </div>
-        <h2 className="text-xl font-black text-slate-800 mb-3">
+        <h2 className="sp-heading text-xl font-semibold mb-3">
           {t('No projects yet')}
         </h2>
-        <p className="text-sm text-slate-500 mb-6">
+        <p className="sp-metadata text-sm leading-6 mb-5">
           {t('Projects group your tasks and members. Create your first one to begin.')}
         </p>
-        <p className="text-xs font-bold text-indigo-600">{t('Use New Project above to begin.')}</p>
+        <p className="text-xs font-medium text-indigo-600">{t('Use New Project above to begin.')}</p>
       </div>
     );
   }
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-6">
-        <div>
-          <h2 className="text-2xl font-black text-slate-800 tracking-tight">
-            {selectedWorkspace ? t('Tasks in {{project}}', { project: selectedWorkspace.name }) : t('Tasks')}
-          </h2>
-          <p className="mt-1 text-xs text-slate-500">{t('Projects organize tasks and members. You can create multiple projects.')}</p>
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-5">
+        <div className="flex items-center gap-2.5">
+          <h2 className="sp-heading text-lg font-semibold">{t('Tasks')}</h2>
+          <span className="sp-metadata text-xs tabular-nums">{visibleProjects.length}</span>
         </div>
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2">
           {selectedMultiIds.length >= 2 && (
             <button
               onClick={onEnterMultiView}
-              className="px-4 py-2 rounded-xl border border-indigo-200 text-[10px] font-black uppercase tracking-widest text-indigo-600 hover:bg-indigo-50"
+              className="sp-button-secondary px-3 text-xs font-medium"
             >
               {t('Compare')} ({selectedMultiIds.length})
             </button>
           )}
           <button
             onClick={onCreateProject}
-            className="px-5 py-2 bg-slate-900 text-white rounded-xl text-xs font-black uppercase tracking-widest hover:bg-slate-800 transition-all"
+            className="sp-button-primary inline-flex items-center gap-2 px-3.5 text-xs font-medium"
           >
-            <i className="fas fa-plus mr-2"></i> {t('New Task')}
+            <i className="fas fa-plus text-[10px]" aria-hidden="true"></i> {t('New Task')}
           </button>
         </div>
       </div>
 
       {visibleProjects.length === 0 ? (
-        <div className="bg-slate-50 rounded-2xl p-12 text-center text-sm text-slate-400">
+        <div className="sp-task-card flex min-h-[220px] items-center justify-center rounded-2xl border border-dashed p-8 text-center text-sm text-slate-500">
           {t('No tasks in this project yet.')}
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
           {visibleProjects.map((p) => {
             const checked = selectedMultiIds.includes(p.id);
             return (
               <div
                 key={p.id}
-                className="bg-white rounded-2xl border border-slate-200 hover:border-slate-300 transition-all shadow-sm p-5 relative"
+                className="sp-task-card group relative rounded-2xl border transition-colors"
+                data-selected={checked}
               >
                 <button
                   onClick={() => onToggleMultiSelect(p.id)}
-                  className={`absolute top-3 right-3 w-6 h-6 rounded-md border-2 transition-all ${
+                  type="button"
+                  className={`sp-task-card-selection absolute top-4 right-4 z-10 flex h-6 w-6 items-center justify-center rounded-md border transition-colors outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 ${
                     checked
-                      ? 'bg-slate-900 border-slate-900'
+                      ? 'bg-indigo-600 border-indigo-600'
                       : 'border-slate-200 hover:border-slate-400'
                   }`}
                   aria-label={t('Select for multi-view')}
+                  aria-pressed={checked}
                 >
                   {checked && (
-                    <i className="fas fa-check text-white text-[10px]"></i>
+                    <i className="fas fa-check text-white text-[10px]" aria-hidden="true"></i>
                   )}
                 </button>
                 <button
                   type="button"
                   onClick={() => onSelectProject(p.id)}
-                  className="block w-full pr-5 text-left rounded-xl outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-4"
+                  className="flex min-h-[205px] w-full flex-col rounded-2xl p-5 text-left outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
                   aria-label={`${t('Open task')} ${p.name}`}
                 >
-                  <div
-                    className="w-3 h-3 rounded-full mb-3"
-                    style={{ backgroundColor: p.color }}
-                  ></div>
-                  <h3 className="font-black text-slate-800 text-sm leading-tight mb-1">
-                    {p.name}
-                  </h3>
-                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">
-                    {p.startDate} → {p.endDate}
+                  <div className="mb-3 flex items-center gap-2.5 pr-7">
+                    <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: p.color }} aria-hidden="true" />
+                    <h3 className="sp-heading line-clamp-2 text-[15px] font-semibold leading-6 break-words">{p.name}</h3>
+                  </div>
+                  <p className="sp-metadata flex flex-wrap items-center gap-1.5 text-xs tabular-nums">
+                    <i className="far fa-calendar mr-0.5 text-[11px]" aria-hidden="true" />
+                    <time dateTime={p.startDate}>{p.startDate}</time><span aria-hidden="true">—</span><time dateTime={p.endDate}>{p.endDate}</time>
                   </p>
                   {p.description && (
-                    <p className="text-xs text-slate-500 mt-2 line-clamp-2">
+                    <p className="sp-metadata mt-3 line-clamp-2 text-sm leading-6">
                       {p.description}
                     </p>
                   )}
-                  <div className="flex items-center gap-2 mt-3 text-[9px] font-bold text-slate-400 uppercase tracking-widest">
-                    <span className="px-1.5 py-0.5 bg-slate-50 rounded">
+                  <div className="mt-auto flex w-full items-center gap-2 pt-5 text-xs">
+                    <span className="sp-metadata min-w-0 truncate">
                       {t(p.visibility === 'workspace' ? 'All project members' : 'Task members only')}
                     </span>
                     {p.myRole && (
-                      <span className="px-1.5 py-0.5 bg-indigo-50 text-indigo-600 rounded">
+                      <span className="shrink-0 rounded-md border border-slate-200 px-1.5 py-0.5 text-[11px] font-medium text-slate-600">
                         {t(p.myRole)}
                       </span>
                     )}
+                    <i className="fas fa-arrow-right ml-auto shrink-0 text-[11px] text-slate-400 transition-transform group-hover:translate-x-0.5" aria-hidden="true" />
                   </div>
                 </button>
-                {(p.myRole === 'Lead' || workspaces.some((workspace) => workspace.id === p.workspaceId && (workspace.role === 'Owner' || workspace.role === 'Admin'))) && <button
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    onDeleteProject(p.id);
-                  }}
-                  className="mt-3 text-[10px] font-bold text-red-400 hover:text-red-600 transition-colors"
-                >
-                  <i className="fas fa-trash mr-1"></i> {t('Delete')}
-                </button>}
               </div>
             );
           })}

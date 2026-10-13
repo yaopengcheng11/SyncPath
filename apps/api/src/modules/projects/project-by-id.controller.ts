@@ -70,7 +70,7 @@ export class ProjectByIdController {
   }
 
   @Delete(':id')
-  @ApiOperation({ summary: 'Soft-delete a project (Lead only).' })
+  @ApiOperation({ summary: 'Permanently delete a project and its children (Lead only).' })
   @HttpCode(204)
   @ProjectRoles('Lead')
   async remove(
@@ -78,6 +78,6 @@ export class ProjectByIdController {
     @Param('id') id: string
   ): Promise<void> {
     const { project } = await this.projects.getById({ projectId: id, user });
-    await this.projects.softDelete({ project, user });
+    await this.projects.delete({ project, user });
   }
 }

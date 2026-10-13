@@ -76,12 +76,12 @@ export class WorkspacesController {
   @Delete(':id')
   @HttpCode(204)
   @ApiOperation({
-    summary: 'Archive a workspace (Owner only). Children are hidden but data is preserved.'
+    summary: 'Permanently delete a workspace and its children (Owner only).'
   })
   async remove(
     @CurrentUser() user: User,
     @Param('id') id: string
   ): Promise<void> {
-    await this.workspaces.softDelete({ workspaceId: id, user });
+    await this.workspaces.delete({ workspaceId: id, user });
   }
 }

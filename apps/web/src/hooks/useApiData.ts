@@ -46,6 +46,8 @@ const EMPTY_STATE: ApiDataState = {
 export interface ApiData extends ApiDataState {
   signIn: (user: PublicUser) => Promise<void>;
   signOut: () => Promise<void>;
+  /** Clear this tab's state without revoking another tab's current cookie. */
+  invalidateSession: () => void;
   refreshWorkspaces: () => Promise<void>;
   createWorkspace: (
     body: Parameters<typeof apiClient.createWorkspace>[0]
@@ -99,6 +101,8 @@ export function useApiData(): ApiData {
   const [state, setState] = useState<ApiDataState>(EMPTY_STATE);
   // Track in-flight requests so we don't trigger React updates after unmount.
   const aliveRef = useRef(true);
+  // A response started before sign-in/invalidation belongs to the old account.
+  const authEpochRef = useRef(0);
 
   useEffect(() => {
     aliveRef.current = true;
@@ -108,22 +112,23 @@ export function useApiData(): ApiData {
   }, []);
 
   const safeSet = useCallback(
-    (updater: (prev: ApiDataState) => ApiDataState) => {
-      if (!aliveRef.current) return;
-      setState(updater);
+    (updater: (prev: ApiDataState) => ApiDataState, epoch: number) => {
+      if (!aliveRef.current || authEpochRef.current !== epoch) return;
+      setState((previous) => authEpochRef.current === epoch ? updater(previous) : previous);
     },
     []
   );
 
   const probe = useCallback(async (): Promise<PublicUser | null> => {
-    safeSet((s) => ({ ...s, loading: true, error: null }));
+    const epoch = authEpochRef.current;
+    safeSet((s) => ({ ...s, loading: true, error: null }), epoch);
     try {
       const session = await apiClient.me();
-      safeSet((s) => ({ ...s, user: session.user, loading: false }));
+      safeSet((s) => ({ ...s, user: session.user, loading: false }), epoch);
       return session.user;
     } catch (err) {
       if (err instanceof ApiError && (err.status === 401 || err.status === 403)) {
-        safeSet((s) => ({ ...s, user: null, loading: false }));
+        safeSet(() => ({ ...EMPTY_STATE, user: null }), epoch);
         return null;
       }
       safeSet((s) => ({
@@ -131,7 +136,7 @@ export function useApiData(): ApiData {
         user: null,
         loading: false,
         error: err instanceof Error ? err.message : 'Unknown error'
-      }));
+      }), epoch);
       return null;
     }
   }, [safeSet]);
@@ -143,33 +148,40 @@ export function useApiData(): ApiData {
 
   const signIn = useCallback(
     async (user: PublicUser) => {
-      safeSet((s) => ({ ...s, user, error: null }));
-      await refreshWorkspacesInternal();
+      const epoch = ++authEpochRef.current;
+      safeSet(() => ({ ...EMPTY_STATE, user }), epoch);
+      await refreshWorkspacesInternal(epoch);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [safeSet]
   );
 
+  const invalidateSession = useCallback((): void => {
+    const epoch = ++authEpochRef.current;
+    safeSet(() => ({ ...EMPTY_STATE, user: null }), epoch);
+  }, [safeSet]);
+
   const signOut = useCallback(async () => {
+    const epoch = authEpochRef.current;
     try {
       await apiClient.logout();
     } catch {
       // logout is best-effort; clear local state either way.
     }
-    safeSet(() => ({ ...EMPTY_STATE, user: null }));
-  }, [safeSet]);
+    if (authEpochRef.current === epoch) invalidateSession();
+  }, [invalidateSession]);
 
-  async function refreshWorkspacesInternal(): Promise<void> {
-    safeSet((s) => ({ ...s, loading: true, error: null }));
+  async function refreshWorkspacesInternal(epoch = authEpochRef.current): Promise<void> {
+    safeSet((s) => ({ ...s, loading: true, error: null }), epoch);
     try {
       const workspaces = await apiClient.listWorkspaces();
-      safeSet((s) => ({ ...s, workspaces, loading: false }));
+      safeSet((s) => ({ ...s, workspaces, loading: false }), epoch);
     } catch (err) {
       safeSet((s) => ({
         ...s,
         loading: false,
         error: err instanceof Error ? err.message : 'Unknown error'
-      }));
+      }), epoch);
     }
   }
 
@@ -180,12 +192,13 @@ export function useApiData(): ApiData {
 
   const createWorkspace = useCallback(
     async (body: Parameters<typeof apiClient.createWorkspace>[0]): Promise<PublicWorkspace> => {
+      const epoch = authEpochRef.current;
       const created = await apiClient.createWorkspace(body);
       safeSet((s) => ({
         ...s,
         workspaces: [...s.workspaces.filter((workspace) => workspace.id !== created.id), created],
         error: null
-      }));
+      }), epoch);
       return created;
     },
     [safeSet]
@@ -196,13 +209,14 @@ export function useApiData(): ApiData {
       workspaceId: string,
       body: Parameters<typeof apiClient.updateWorkspace>[1]
     ): Promise<PublicWorkspace> => {
+      const epoch = authEpochRef.current;
       const updated = await apiClient.updateWorkspace(workspaceId, body);
       safeSet((s) => ({
         ...s,
         workspaces: s.workspaces.map((workspace) =>
           workspace.id === workspaceId ? updated : workspace
         )
-      }));
+      }), epoch);
       return updated;
     },
     [safeSet]
@@ -210,6 +224,7 @@ export function useApiData(): ApiData {
 
   const deleteWorkspace = useCallback(
     async (workspaceId: string): Promise<void> => {
+      const epoch = authEpochRef.current;
       await apiClient.deleteWorkspace(workspaceId);
       safeSet((s) => {
         const projectIds = new Set(
@@ -225,15 +240,16 @@ export function useApiData(): ApiData {
           projects,
           entries
         };
-      });
+      }, epoch);
     },
     [safeSet]
   );
 
   const refreshProjects = useCallback(
     async (workspaceId: string): Promise<PublicProject[]> => {
+      const epoch = authEpochRef.current;
       const list = await apiClient.listProjects(workspaceId);
-      safeSet((s) => ({ ...s, projects: { ...s.projects, [workspaceId]: list } }));
+      safeSet((s) => ({ ...s, projects: { ...s.projects, [workspaceId]: list } }), epoch);
       return list;
     },
     [safeSet]
@@ -241,8 +257,9 @@ export function useApiData(): ApiData {
 
   const refreshEntries = useCallback(
     async (projectId: string): Promise<PublicEntry[]> => {
+      const epoch = authEpochRef.current;
       const list = await apiClient.listEntries(projectId);
-      safeSet((s) => ({ ...s, entries: { ...s.entries, [projectId]: list } }));
+      safeSet((s) => ({ ...s, entries: { ...s.entries, [projectId]: list } }), epoch);
       return list;
     },
     [safeSet]
@@ -253,6 +270,7 @@ export function useApiData(): ApiData {
       workspaceId: string,
       body: Parameters<typeof apiClient.createProject>[1]
     ): Promise<PublicProject> => {
+      const epoch = authEpochRef.current;
       const created = await apiClient.createProject(workspaceId, body);
       safeSet((s) => {
         const existing = s.projects[workspaceId] ?? [];
@@ -263,7 +281,7 @@ export function useApiData(): ApiData {
             w.id === workspaceId ? w : w
           )
         };
-      });
+      }, epoch);
       return created;
     },
     [safeSet]
@@ -274,6 +292,7 @@ export function useApiData(): ApiData {
       projectId: string,
       body: Parameters<typeof apiClient.updateProject>[1]
     ): Promise<PublicProject> => {
+      const epoch = authEpochRef.current;
       const updated = await apiClient.updateProject(projectId, body);
       safeSet((s) => {
         // The project cache is keyed by workspace id, so rewrite the entry in
@@ -287,7 +306,7 @@ export function useApiData(): ApiData {
           }
         }
         return { ...s, projects: next };
-      });
+      }, epoch);
       return updated;
     },
     [safeSet]
@@ -295,6 +314,7 @@ export function useApiData(): ApiData {
 
   const deleteProject = useCallback(
     async (projectId: string): Promise<void> => {
+      const epoch = authEpochRef.current;
       await apiClient.deleteProject(projectId);
       safeSet((s) => {
         const next: typeof s.projects = {};
@@ -304,7 +324,7 @@ export function useApiData(): ApiData {
         const entriesNext = { ...s.entries };
         delete entriesNext[projectId];
         return { ...s, projects: next, entries: entriesNext };
-      });
+      }, epoch);
     },
     [safeSet]
   );
@@ -314,6 +334,7 @@ export function useApiData(): ApiData {
       projectId: string,
       body: Parameters<typeof apiClient.createEntry>[1]
     ): Promise<PublicEntry> => {
+      const epoch = authEpochRef.current;
       const created = await apiClient.createEntry(projectId, body);
       safeSet((s) => {
         const existing = s.entries[projectId] ?? [];
@@ -321,21 +342,23 @@ export function useApiData(): ApiData {
           ...s,
           entries: { ...s.entries, [projectId]: [...existing.filter((entry) => entry.id !== created.id), created] }
         };
-      });
+      }, epoch);
       return created;
     },
     [safeSet]
   );
 
   const updateEntry = useCallback(async (projectId: string, entryId: string, body: Parameters<typeof apiClient.updateEntry>[1]) => {
+    const epoch = authEpochRef.current;
     const updated = await apiClient.updateEntry(entryId, body);
-    safeSet((s) => ({ ...s, entries: { ...s.entries, [projectId]: (s.entries[projectId] ?? []).map((e) => e.id === entryId ? updated : e) } }));
+    safeSet((s) => ({ ...s, entries: { ...s.entries, [projectId]: (s.entries[projectId] ?? []).map((e) => e.id === entryId ? updated : e) } }), epoch);
     return updated;
   }, [safeSet]);
 
   const deleteEntry = useCallback(async (projectId: string, entryId: string, expectedRevision?: number) => {
+    const epoch = authEpochRef.current;
     await apiClient.deleteEntry(entryId, expectedRevision);
-    safeSet((s) => ({ ...s, entries: { ...s.entries, [projectId]: (s.entries[projectId] ?? []).filter((e) => e.id !== entryId) } }));
+    safeSet((s) => ({ ...s, entries: { ...s.entries, [projectId]: (s.entries[projectId] ?? []).filter((e) => e.id !== entryId) } }), epoch);
   }, [safeSet]);
 
   const importLegacyJson = useCallback(
@@ -343,6 +366,7 @@ export function useApiData(): ApiData {
       body: Record<string, unknown>,
       opts?: { accept?: boolean; workspaceName?: string }
     ): Promise<unknown> => {
+      const epoch = authEpochRef.current;
       const wrapped = {
         ...body,
         accept: opts?.accept ?? true,
@@ -359,7 +383,7 @@ export function useApiData(): ApiData {
       if (!res.ok) {
         throw new Error(`import failed (${res.status})`);
       }
-      await refreshWorkspacesInternal();
+      if (authEpochRef.current === epoch) await refreshWorkspacesInternal(epoch);
       // eslint-disable-next-line react-hooks/exhaustive-deps
       return res.json();
     },
@@ -371,6 +395,7 @@ export function useApiData(): ApiData {
       ...state,
       signIn,
       signOut,
+      invalidateSession,
       refreshWorkspaces,
       createWorkspace,
       updateWorkspace,
@@ -389,6 +414,7 @@ export function useApiData(): ApiData {
       state,
       signIn,
       signOut,
+      invalidateSession,
       refreshWorkspaces,
       createWorkspace,
       updateWorkspace,

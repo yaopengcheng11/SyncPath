@@ -42,8 +42,8 @@ http://192.168.1.20:5183
 - revision 冲突保护，避免后写入覆盖先写入。
 
 成员和权限入口：在首页选中工作区后点击卡片旁的齿轮进入 **Workspace settings**；
-成员管理、改名和归档都从这个面板进入。Owner/Admin 可以修改名称，只有 Owner
-可以归档工作区（归档会隐藏数据，不会立即物理删除）；
+成员管理、改名和删除都从这个面板进入。Owner/Admin 可以修改名称，只有 Owner
+可以删除工作区（界面中的项目）；删除会永久移除数据库记录及下级任务、卡片、权限和分享，不提供归档或回收站。
 进入项目后点击 **Members** 管理项目成员。工作区角色是 Owner / Admin / Member，
 项目角色是 Lead / Editor / Viewer。Owner/Admin 负责团队管理，Editor 可以编辑
 卡片，Viewer 只读。

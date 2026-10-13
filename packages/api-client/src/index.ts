@@ -56,6 +56,13 @@ export interface PublicWorkspaceMember {
 export type ShareLinkMetadata = components['schemas']['PublicShareLink'];
 export type CreatedShareLink = components['schemas']['CreatedShareLink'];
 export type SharedContent = components['schemas']['SharedContent'];
+export type ReceivedShare = components['schemas']['ReceivedShare'];
+export type TimelineChange = components['schemas']['TimelineChange'];
+export type TimelineVersionSummary = components['schemas']['TimelineVersionSummary'];
+export type TimelineVersionDetail = components['schemas']['TimelineVersionDetail'];
+export type TimelineVersionsPage = components['schemas']['TimelineVersionPage'];
+export type MentionTimelineItem = components['schemas']['MentionTimelineItem'];
+export type MentionTimelineResponse = components['schemas']['MentionTimelineContent'];
 export type RegisterBody = {
   email: string;
   username: string;
@@ -236,12 +243,28 @@ export class ApiClient {
     return this.request('GET', `/projects/${projectId}/mention-candidates`);
   }
 
-  listMentionNotifications(): Promise<PublicMentionNotification[]> {
-    return this.request('GET', '/notifications');
+  listMentionNotifications(options?: { signal?: AbortSignal }): Promise<PublicMentionNotification[]> {
+    return this.request('GET', '/notifications', undefined, options);
   }
 
-  async markMentionRead(notificationId: string): Promise<void> {
-    await this.request<null>('PATCH', `/notifications/${notificationId}/read`);
+  listTimelineVersions(projectId: string, options?: { beforeVersion?: number; limit?: number; signal?: AbortSignal; expectedUserId?: string }): Promise<TimelineVersionsPage> {
+    const query = new URLSearchParams();
+    if (options?.beforeVersion !== undefined) query.set('beforeVersion', String(options.beforeVersion));
+    if (options?.limit !== undefined) query.set('limit', String(options.limit));
+    return this.request('GET', `/projects/${encodeURIComponent(projectId)}/timeline-versions${query.size ? `?${query}` : ''}`, undefined, options);
+  }
+
+  getTimelineVersion(projectId: string, versionId: string, options?: { signal?: AbortSignal; expectedUserId?: string }): Promise<TimelineVersionDetail> {
+    return this.request('GET', `/projects/${encodeURIComponent(projectId)}/timeline-versions/${encodeURIComponent(versionId)}`, undefined, options);
+  }
+
+  getMentionsTimeline(options?: { workspaceIds?: string[]; signal?: AbortSignal; expectedUserId?: string }): Promise<MentionTimelineResponse> {
+    const query = options?.workspaceIds === undefined ? '' : `?workspaceIds=${encodeURIComponent(options.workspaceIds.join(','))}`;
+    return this.request('GET', `/mentions/timeline${query}`, undefined, options);
+  }
+
+  async markMentionRead(notificationId: string, options?: { signal?: AbortSignal }): Promise<void> {
+    await this.request<null>('PATCH', `/notifications/${encodeURIComponent(notificationId)}/read`, undefined, options);
   }
 
   inviteProjectMember(
@@ -285,8 +308,16 @@ export class ApiClient {
     await this.request<null>('DELETE', `/share-links/${encodeURIComponent(id)}`);
   }
 
-  resolveShareLink(token: string, options?: { signal?: AbortSignal }): Promise<SharedContent> {
+  resolveShareLink(token: string, options?: { signal?: AbortSignal; expectedUserId?: string }): Promise<SharedContent> {
     return this.request('POST', '/share-links/resolve', { token }, options);
+  }
+
+  listReceivedShares(options?: { signal?: AbortSignal; expectedUserId?: string }): Promise<ReceivedShare[]> {
+    return this.request('GET', '/received-shares', undefined, options);
+  }
+
+  resolveReceivedShare(id: string, options?: { signal?: AbortSignal; expectedUserId?: string }): Promise<SharedContent> {
+    return this.request('POST', `/received-shares/${encodeURIComponent(id)}/resolve`, undefined, options);
   }
 
   // ─── internals ────────────────────────────────────────────────────
@@ -295,13 +326,16 @@ export class ApiClient {
     method: string,
     path: string,
     body?: unknown,
-    options?: { signal?: AbortSignal }
+    options?: { signal?: AbortSignal; expectedUserId?: string }
   ): Promise<T> {
     const init: RequestInit = {
       method,
       signal: options?.signal,
       credentials: this.credentials,
-      headers: body !== undefined ? { 'Content-Type': 'application/json' } : {}
+      headers: {
+        ...(body !== undefined ? { 'Content-Type': 'application/json' } : {}),
+        ...(options?.expectedUserId !== undefined ? { 'X-SyncPath-User-Id': options.expectedUserId } : {})
+      }
     };
     if (body !== undefined) init.body = JSON.stringify(body);
 

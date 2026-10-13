@@ -94,9 +94,9 @@ const ProjectMembersPanel: React.FC<ProjectMembersPanelProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-[3000] bg-slate-950/40 backdrop-blur-sm flex justify-end" onMouseDown={onClose}>
+    <div className="sp-modal-backdrop fixed inset-0 z-[3000] bg-slate-950/40 backdrop-blur-sm flex justify-end" onMouseDown={onClose}>
       <aside
-        className="w-full max-w-xl h-full bg-white shadow-2xl flex flex-col"
+        className="sp-side-panel w-full max-w-xl h-full bg-white shadow-2xl flex flex-col"
         onMouseDown={(event) => event.stopPropagation()}
         aria-label={t('Task members and permissions')}
       >

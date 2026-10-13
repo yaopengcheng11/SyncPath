@@ -27,7 +27,6 @@ export const PERMISSIONS = [
   'project:read',
   'project:update',
   'project:delete',
-  'project:archive',
   'project:manage_members',
 
   // Progress entries (WorkLog in legacy terminology)
@@ -57,7 +56,7 @@ const WORKSPACE_MATRIX: Record<WorkspaceRole, ReadonlySet<Permission>> = {
     'workspace:read', 'workspace:update', 'workspace:delete',
     'workspace:manage_members', 'workspace:invite_members',
     'project:create', 'project:read', 'project:update', 'project:delete',
-    'project:archive', 'project:manage_members',
+    'project:manage_members',
     'progress_entry:create', 'progress_entry:read',
     'progress_entry:update', 'progress_entry:delete',
     'comment:create', 'comment:read', 'comment:update_own', 'comment:delete_own'
@@ -66,7 +65,7 @@ const WORKSPACE_MATRIX: Record<WorkspaceRole, ReadonlySet<Permission>> = {
     'workspace:read', 'workspace:update',
     'workspace:manage_members', 'workspace:invite_members',
     'project:create', 'project:read', 'project:update', 'project:delete',
-    'project:archive', 'project:manage_members',
+    'project:manage_members',
     'progress_entry:create', 'progress_entry:read',
     'progress_entry:update', 'progress_entry:delete',
     'comment:create', 'comment:read', 'comment:update_own', 'comment:delete_own'
@@ -83,7 +82,7 @@ const WORKSPACE_MATRIX: Record<WorkspaceRole, ReadonlySet<Permission>> = {
 
 const PROJECT_MATRIX: Record<ProjectRole, ReadonlySet<Permission>> = {
   Lead: new Set<Permission>([
-    'project:read', 'project:update', 'project:delete', 'project:archive',
+    'project:read', 'project:update', 'project:delete',
     'project:manage_members',
     'progress_entry:create', 'progress_entry:read',
     'progress_entry:update', 'progress_entry:delete',

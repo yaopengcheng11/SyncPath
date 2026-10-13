@@ -253,7 +253,7 @@
       },
       "delete": {
         "operationId": "WorkspacesController_remove",
-        "summary": "Archive a workspace (Owner only). Children are hidden but data is preserved.",
+        "summary": "Permanently delete a workspace and its children (Owner only).",
         "parameters": [
           {
             "name": "id",
@@ -434,7 +434,7 @@
       },
       "delete": {
         "operationId": "ProjectsController_remove",
-        "summary": "Soft-delete a project within the workspace.",
+        "summary": "Permanently delete a project and its children within the workspace.",
         "parameters": [
           {
             "name": "workspaceId",
@@ -534,7 +534,7 @@
       },
       "delete": {
         "operationId": "ProjectByIdController_remove",
-        "summary": "Soft-delete a project (Lead only).",
+        "summary": "Permanently delete a project and its children (Lead only).",
         "parameters": [
           {
             "name": "id",
@@ -552,6 +552,124 @@
         },
         "tags": [
           "projects"
+        ]
+      }
+    },
+    "/api/v1/projects/{projectId}/timeline-versions": {
+      "get": {
+        "operationId": "TimelineHistoryController_list",
+        "summary": "List immutable timeline versions (task Lead or project administrator only).",
+        "parameters": [
+          {
+            "name": "projectId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-syncpath-user-id",
+            "required": true,
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "beforeVersion",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "limit",
+            "required": false,
+            "in": "query",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "X-SyncPath-User-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TimelineVersionPage"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "timeline-history"
+        ]
+      }
+    },
+    "/api/v1/projects/{projectId}/timeline-versions/{versionId}": {
+      "get": {
+        "operationId": "TimelineHistoryController_detail",
+        "summary": "Inspect a historical timeline snapshot and its field changes.",
+        "parameters": [
+          {
+            "name": "projectId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "versionId",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-syncpath-user-id",
+            "required": true,
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-SyncPath-User-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TimelineVersionDetail"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "timeline-history"
         ]
       }
     },
@@ -698,7 +816,7 @@
       },
       "delete": {
         "operationId": "EntryActionsController_remove",
-        "summary": "Soft-delete a progress entry (revision-checked via expectedRevision).",
+        "summary": "Permanently delete a progress entry and its history content (revision-checked via expectedRevision).",
         "parameters": [
           {
             "name": "id",
@@ -795,6 +913,54 @@
         "responses": {
           "204": {
             "description": ""
+          }
+        },
+        "tags": [
+          "mentions"
+        ]
+      }
+    },
+    "/api/v1/mentions/timeline": {
+      "get": {
+        "operationId": "MentionTimelineController_timeline",
+        "summary": "Combine the signed-in user’s currently accessible mentioned cards on one timeline.",
+        "parameters": [
+          {
+            "name": "x-syncpath-user-id",
+            "required": true,
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "workspaceIds",
+            "required": false,
+            "in": "query",
+            "description": "Comma separated project IDs; omitted means all projects, empty means none.",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-SyncPath-User-Id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MentionTimelineContent"
+                }
+              }
+            }
           }
         },
         "tags": [
@@ -1244,7 +1410,25 @@
       "post": {
         "operationId": "SharingController_resolve",
         "summary": "Resolve shared read-only content after authentication; token is sent in the body.",
-        "parameters": [],
+        "parameters": [
+          {
+            "name": "x-syncpath-user-id",
+            "required": true,
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-SyncPath-User-Id",
+            "in": "header",
+            "description": "Expected authenticated user ID; rejects a session changed by another browser tab.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "requestBody": {
           "required": true,
           "content": {
@@ -1255,6 +1439,97 @@
             }
           }
         },
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SharedContent"
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "sharing"
+        ]
+      }
+    },
+    "/api/v1/received-shares": {
+      "get": {
+        "operationId": "SharingController_listReceived",
+        "summary": "List shares previously opened by the authenticated recipient, including unavailable snapshots.",
+        "parameters": [
+          {
+            "name": "x-syncpath-user-id",
+            "required": true,
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-SyncPath-User-Id",
+            "in": "header",
+            "description": "Expected authenticated user ID; rejects a session changed by another browser tab.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/ReceivedShare"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "tags": [
+          "sharing"
+        ]
+      }
+    },
+    "/api/v1/received-shares/{id}/resolve": {
+      "post": {
+        "operationId": "SharingController_resolveReceived",
+        "summary": "Reopen a recipient-owned receipt after rechecking the original share link.",
+        "parameters": [
+          {
+            "name": "id",
+            "required": true,
+            "in": "path",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "x-syncpath-user-id",
+            "required": true,
+            "in": "header",
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "X-SyncPath-User-Id",
+            "in": "header",
+            "description": "Expected authenticated user ID; rejects a session changed by another browser tab.",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "",
@@ -1581,8 +1856,7 @@
           "status": {
             "type": "string",
             "enum": [
-              "active",
-              "archived"
+              "active"
             ]
           },
           "color": {
@@ -1605,6 +1879,196 @@
         },
         "required": [
           "expectedRevision"
+        ]
+      },
+      "TimelineActor": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "username": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "username",
+          "displayName"
+        ]
+      },
+      "TimelineChange": {
+        "type": "object",
+        "properties": {
+          "entity": {
+            "type": "string",
+            "enum": [
+              "task",
+              "card"
+            ]
+          },
+          "entityId": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "field": {
+            "type": "string"
+          },
+          "before": {
+            "type": "string",
+            "nullable": true
+          },
+          "after": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "entity",
+          "entityId",
+          "title",
+          "field",
+          "before",
+          "after"
+        ]
+      },
+      "TimelineVersionSummary": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "version": {
+            "type": "number"
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "actor": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TimelineActor"
+              }
+            ]
+          },
+          "action": {
+            "type": "string"
+          },
+          "entryId": {
+            "type": "string",
+            "nullable": true
+          },
+          "changes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TimelineChange"
+            }
+          }
+        },
+        "required": [
+          "id",
+          "projectId",
+          "version",
+          "createdAt",
+          "actor",
+          "action",
+          "entryId",
+          "changes"
+        ]
+      },
+      "TimelineVersionPage": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TimelineVersionSummary"
+            }
+          },
+          "nextBeforeVersion": {
+            "type": "number",
+            "nullable": true
+          }
+        },
+        "required": [
+          "items",
+          "nextBeforeVersion"
+        ]
+      },
+      "TimelineProjectSnapshot": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "workspaceId": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string",
+            "nullable": true
+          },
+          "startDate": {
+            "type": "string"
+          },
+          "endDate": {
+            "type": "string"
+          },
+          "visibility": {
+            "type": "string",
+            "enum": [
+              "private",
+              "workspace"
+            ]
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "archived"
+            ]
+          },
+          "color": {
+            "type": "string"
+          },
+          "holidayRegion": {
+            "type": "string",
+            "nullable": true
+          },
+          "revision": {
+            "type": "number"
+          },
+          "deletedAt": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "id",
+          "workspaceId",
+          "name",
+          "description",
+          "startDate",
+          "endDate",
+          "visibility",
+          "status",
+          "color",
+          "holidayRegion",
+          "revision",
+          "deletedAt"
         ]
       },
       "PublicEntry": {
@@ -1694,6 +2158,76 @@
           "revision",
           "createdAt",
           "updatedAt"
+        ]
+      },
+      "TimelineSnapshot": {
+        "type": "object",
+        "properties": {
+          "project": {
+            "$ref": "#/components/schemas/TimelineProjectSnapshot"
+          },
+          "entries": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PublicEntry"
+            }
+          }
+        },
+        "required": [
+          "project",
+          "entries"
+        ]
+      },
+      "TimelineVersionDetail": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "projectId": {
+            "type": "string"
+          },
+          "version": {
+            "type": "number"
+          },
+          "createdAt": {
+            "type": "string"
+          },
+          "actor": {
+            "nullable": true,
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/TimelineActor"
+              }
+            ]
+          },
+          "action": {
+            "type": "string"
+          },
+          "entryId": {
+            "type": "string",
+            "nullable": true
+          },
+          "changes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/TimelineChange"
+            }
+          },
+          "snapshot": {
+            "$ref": "#/components/schemas/TimelineSnapshot"
+          }
+        },
+        "required": [
+          "id",
+          "projectId",
+          "version",
+          "createdAt",
+          "actor",
+          "action",
+          "entryId",
+          "changes",
+          "snapshot"
         ]
       },
       "CreateEntryBody": {
@@ -1894,6 +2428,61 @@
           "actor",
           "createdAt",
           "readAt"
+        ]
+      },
+      "MentionTimelineWorkspace": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name"
+        ]
+      },
+      "MentionTimelineItem": {
+        "type": "object",
+        "properties": {
+          "workspace": {
+            "$ref": "#/components/schemas/MentionTimelineWorkspace"
+          },
+          "project": {
+            "$ref": "#/components/schemas/PublicProject"
+          },
+          "entry": {
+            "$ref": "#/components/schemas/PublicEntry"
+          }
+        },
+        "required": [
+          "workspace",
+          "project",
+          "entry"
+        ]
+      },
+      "MentionTimelineContent": {
+        "type": "object",
+        "properties": {
+          "workspaces": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MentionTimelineWorkspace"
+            }
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MentionTimelineItem"
+            }
+          }
+        },
+        "required": [
+          "workspaces",
+          "items"
         ]
       },
       "InviteMemberBody": {
@@ -2099,6 +2688,66 @@
           "workspace",
           "projects",
           "entries"
+        ]
+      },
+      "ReceivedShareSharer": {
+        "type": "object",
+        "properties": {
+          "username": {
+            "type": "string"
+          },
+          "displayName": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "required": [
+          "username",
+          "displayName"
+        ]
+      },
+      "ReceivedShare": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "workspace",
+              "project"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "workspaceName": {
+            "type": "string"
+          },
+          "sharedBy": {
+            "$ref": "#/components/schemas/ReceivedShareSharer"
+          },
+          "receivedAt": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "unavailable"
+            ]
+          }
+        },
+        "required": [
+          "id",
+          "kind",
+          "name",
+          "workspaceName",
+          "sharedBy",
+          "receivedAt",
+          "status"
         ]
       }
     }
