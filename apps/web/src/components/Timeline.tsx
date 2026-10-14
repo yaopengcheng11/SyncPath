@@ -15,7 +15,6 @@ interface TimelineProps {
   onSelectDate: (dateStr: string, logId?: string, level?: LogLevel) => void;
   onMoveLogs?: (moves: {id: string, oldDate: string, newDate: string}[]) => void;
   onCopyLogs?: (copies: {id: string, oldDate: string, newDate: string}[]) => void;
-  onUpdateProject?: (updates: Partial<Project>) => void;
   onDeleteLogs?: (logIds: string[]) => Promise<void> | void;
   onToggleLock?: (logId: string, dateStr: string) => void;
   onPasteLogs?: (logs: ClipboardCard[], targetDate: string | null) => void;
@@ -50,7 +49,6 @@ const Timeline: React.FC<TimelineProps> = ({
   onSelectDate, 
   onMoveLogs, 
   onCopyLogs,
-  onUpdateProject, 
   onDeleteLogs,
   onToggleLock,
   onPasteLogs,
@@ -79,7 +77,6 @@ const Timeline: React.FC<TimelineProps> = ({
   const toastRef = useRef<HTMLDivElement>(null);
 
   const [showLevelMenu, setShowLevelMenu] = useState(false);
-  const [showProjectSettings, setShowProjectSettings] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [exportBg, setExportBg] = useState<'white' | 'transparent'>('white');
@@ -89,7 +86,7 @@ const Timeline: React.FC<TimelineProps> = ({
   const [isDeleting, setIsDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const deleteInFlight = useRef(false);
-  const interactionSuspended = suspended || showProjectSettings || showExportModal || exportError !== null || pendingDeleteIds !== null;
+  const interactionSuspended = suspended || showExportModal || exportError !== null || pendingDeleteIds !== null;
 
   const [transform, setTransform] = useState({ x: 0, y: 0, scale: 1 });
   const [timelineScale, setTimelineScale] = useState(1); // New state for horizontal stretching
@@ -341,7 +338,7 @@ const Timeline: React.FC<TimelineProps> = ({
 
       if (e.key === 'Escape') { 
         setSelectedDate(null); setSelectedPercentage(null); setShowLevelMenu(false); 
-        setSelectedLogIds(new Set<string>()); setShowProjectSettings(false); setShowExportModal(false);
+        setSelectedLogIds(new Set<string>()); setShowExportModal(false);
       }
       
       if (!readOnly && onDeleteLogs && (e.key === 'Delete' || e.key === 'Backspace')) {
@@ -776,28 +773,6 @@ const Timeline: React.FC<TimelineProps> = ({
     >
       <div ref={toastRef} className="fixed bottom-10 left-1/2 transform translate-y-[20px] -translate-x-1/2 bg-slate-900 text-white px-6 py-3 rounded-full shadow-2xl z-[9999] opacity-0 transition-all duration-300 pointer-events-none">{t('Action Completed')}</div>
 
-      {!readOnly && showProjectSettings && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-md z-[2000] flex items-center justify-center p-6 animate-in fade-in duration-200" onClick={(e) => e.stopPropagation()}>
-          <div className="bg-white w-full max-w-lg rounded-[2.5rem] shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200" onClick={(e) => e.stopPropagation()}>
-            <header className="px-10 py-8 border-b border-slate-50 flex items-center justify-between">
-              <div><h3 className="text-2xl font-black text-slate-800 tracking-tighter">{t('Configuration')}</h3><p className="text-[10px] font-black uppercase text-slate-400 tracking-widest">{t('Roadmap settings')}</p></div>
-              <button onClick={(e) => { e.stopPropagation(); setShowProjectSettings(false); }} className="w-10 h-10 rounded-full hover:bg-slate-50 flex items-center justify-center text-slate-300 transition-all" aria-label={t('Close')}><i className="fas fa-times"></i></button>
-            </header>
-            <div className="p-10 space-y-8">
-              <div className="space-y-6">
-                <div><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">{t('Task Name')}</label><input value={project.name} onChange={(e) => onUpdateProject?.({ name: e.target.value })} className="w-full px-5 py-3.5 rounded-2xl bg-white border border-slate-200 text-slate-900 font-bold focus:border-indigo-600 focus:ring-4 focus:ring-indigo-50 outline-none transition-all shadow-sm" /></div>
-                <div><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">{t('Lead / Team')}</label><input value={project.personnel} onChange={(e) => onUpdateProject?.({ personnel: e.target.value })} className="w-full px-5 py-3.5 rounded-2xl bg-white border border-slate-200 text-slate-900 font-bold focus:border-indigo-600 focus:ring-4 focus:ring-indigo-50 outline-none transition-all shadow-sm" /></div>
-                <div className="grid grid-cols-2 gap-6">
-                  <div><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">{t('Start Date')}</label><input type="date" value={project.startDate} onChange={(e) => onUpdateProject?.({ startDate: e.target.value })} className="w-full px-5 py-3.5 rounded-2xl bg-white border border-slate-200 text-slate-900 font-bold focus:border-indigo-600 focus:ring-4 focus:ring-indigo-50 outline-none transition-all shadow-sm" /></div>
-                  <div><label className="block text-[10px] font-black text-slate-400 uppercase tracking-widest mb-2">{t('End Date')}</label><input type="date" value={project.endDate} onChange={(e) => onUpdateProject?.({ endDate: e.target.value })} className="w-full px-5 py-3.5 rounded-2xl bg-white border border-slate-200 text-slate-900 font-bold focus:border-indigo-600 focus:ring-4 focus:ring-indigo-50 outline-none transition-all shadow-sm" /></div>
-                </div>
-              </div>
-              <div className="pt-4 flex gap-4"><button onClick={(e) => { e.stopPropagation(); setShowProjectSettings(false); }} className="flex-1 py-4 bg-slate-900 text-white rounded-2xl text-[10px] font-black uppercase tracking-[0.2em] shadow-lg">{t('Done')}</button></div>
-            </div>
-          </div>
-        </div>
-      )}
-
       {showExportModal && <TimelineExportDialog
         open={showExportModal}
         project={project}
@@ -1002,7 +977,6 @@ const Timeline: React.FC<TimelineProps> = ({
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-xs font-medium text-slate-500 flex items-center gap-1.5" title={t('Collapse / expand cards')}><kbd className="px-1.5 py-0.5 rounded bg-slate-100 text-slate-400 border border-slate-200">E</kbd> {t('Collapse / expand cards')}</span>
           <button onClick={() => { setExportError(null); setShowExportModal(true); }} disabled={isExporting} className="sp-button-secondary text-sm font-semibold text-slate-600 border border-slate-200 px-4 py-2 rounded-xl bg-white shadow-sm flex items-center gap-2 hover:bg-slate-50 transition-colors disabled:opacity-50"><i className={`fas ${isExporting ? 'fa-spinner fa-spin' : 'fa-arrow-up-from-bracket'}`} aria-hidden="true"></i> { isExporting ? t('Processing...') : t('Export') }</button>
-          {!readOnly && onUpdateProject && (<button onClick={(e) => { e.stopPropagation(); setShowProjectSettings(true); }} className="sp-button-secondary text-sm font-semibold text-slate-600 border border-slate-200 px-4 py-2 rounded-xl bg-white shadow-sm flex items-center gap-2 hover:bg-slate-50 transition-colors"><i className="fas fa-sliders-h"></i> {t('Settings')}</button>)}
           <div className="flex items-center bg-white rounded-full border border-slate-200 shadow-sm mx-2">
             <button onClick={handleZoomOut} disabled={timelineScale <= 1} className="w-10 h-10 flex items-center justify-center rounded-l-full hover:bg-slate-50 text-slate-500 transition-colors disabled:opacity-30" title={t('Shrink Timeline')} aria-label={t('Shrink Timeline')}><i className="fas fa-minus text-[10px]"></i></button>
             <div className="w-px h-4 bg-slate-100"></div>

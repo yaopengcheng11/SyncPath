@@ -13,12 +13,6 @@ export interface HeaderActionsProps {
   onOpenMentionsTimeline?: () => void;
   onSignOut: () => void;
   onShare?: () => void;
-  onProjectSettings?: () => void;
-  onProjectMembers?: () => void;
-  onTaskSettings?: () => void;
-  onTaskMembers?: () => void;
-  projectName?: string;
-  taskName?: string;
   presence?: React.ReactNode;
 }
 

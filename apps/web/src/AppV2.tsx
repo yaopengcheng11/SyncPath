@@ -228,8 +228,11 @@ const AppMain: React.FC<{
   const [activeLogDate, setActiveLogDate] = useState<string | null>(null);
   const [activeLogId, setActiveLogId] = useState<string | null>(null);
   const [activeLogLevel, setActiveLogLevel] = useState<1 | 2 | 3>(3);
-  const [showMembers, setShowMembers] = useState(false);
-  const [showProjectSettings, setShowProjectSettings] = useState(false);
+  // Task settings / task members are opened from the task card in the task
+  // list, so the panel needs to know WHICH task it belongs to rather than
+  // assuming the currently-open one.
+  const [settingsProjectId, setSettingsProjectId] = useState<string | null>(null);
+  const [membersProjectId, setMembersProjectId] = useState<string | null>(null);
   const [showTimelineHistory, setShowTimelineHistory] = useState(false);
   const [showWorkspaceMembers, setShowWorkspaceMembers] = useState(false);
   const [shareTarget, setShareTarget] = useState<ShareTarget | null>(null);
@@ -292,6 +295,17 @@ const AppMain: React.FC<{
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedProjectId]);
 
+  // The multi-task view stacks several tasks' timelines at once, but entries
+  // are only fetched for the task you last opened. Without this, every other
+  // task on the page would render an empty timeline.
+  useEffect(() => {
+    if (view !== 'multi-timeline') return;
+    for (const id of selectedMultiIds) {
+      if (!api.entries[id]) void api.refreshEntries(id).catch(() => undefined);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, selectedMultiIds]);
+
   const handleLogout = useCallback(async () => {
     await api.signOut();
     setView('dashboard');
@@ -325,6 +339,35 @@ const AppMain: React.FC<{
     }
     return workspaces.find((w) => w.id === selectedWorkspaceId);
   }, [workspaces, activeProject, selectedWorkspaceId]);
+
+  // The task whose settings / members panel is open. Resolved from the id so
+  // both panels work from the task list, where no task is "active" yet.
+  const settingsProject: PublicProject | undefined = useMemo(
+    () => (settingsProjectId ? projects.find((p) => p.id === settingsProjectId) : undefined),
+    [projects, settingsProjectId]
+  );
+  const membersProject: PublicProject | undefined = useMemo(
+    () => (membersProjectId ? projects.find((p) => p.id === membersProjectId) : undefined),
+    [projects, membersProjectId]
+  );
+  const settingsProjectWorkspace = useMemo(
+    () => (settingsProject ? workspaces.find((w) => w.id === settingsProject.workspaceId) : undefined),
+    [workspaces, settingsProject]
+  );
+  const membersProjectWorkspace = useMemo(
+    () => (membersProject ? workspaces.find((w) => w.id === membersProject.workspaceId) : undefined),
+    [workspaces, membersProject]
+  );
+  const canEditSettingsProject = Boolean(
+    settingsProject
+    && (settingsProject.myRole === 'Lead' || settingsProject.myRole === 'Editor'
+      || settingsProjectWorkspace?.role === 'Owner' || settingsProjectWorkspace?.role === 'Admin')
+  );
+  const canManageMembersProject = Boolean(
+    membersProject
+    && (membersProject.myRole === 'Lead'
+      || membersProjectWorkspace?.role === 'Owner' || membersProjectWorkspace?.role === 'Admin')
+  );
 
   const settingsWorkspace = useMemo(
     () => workspaces.find((workspace) => workspace.id === workspaceSettingsId),
@@ -362,6 +405,12 @@ const AppMain: React.FC<{
     collaboration.collaborators, collaboration.connected, user,
     collaboration.selfPresence.action, collaboration.selfPresence.targetId
   ), [collaboration.collaborators, collaboration.connected, collaboration.selfPresence, user]);
+  // Presence is scoped to the task the user currently has open. When the
+  // members panel is opened from the task list there is no live stream for
+  // that task, so report "unavailable" rather than someone else's status.
+  const membersHasLivePresence = Boolean(membersProject && activeProject && membersProject.id === activeProject.id);
+  const membersOnlineUsers = membersHasLivePresence ? onlineUsers : [];
+  const membersPresenceConnected = membersHasLivePresence && collaboration.connected;
   const entryTitles = useMemo(() => Object.fromEntries(
     (selectedProjectId ? api.entries[selectedProjectId] ?? [] : []).map((entry) => [entry.id, entry.title])
   ), [selectedProjectId, api.entries]);
@@ -738,6 +787,13 @@ const AppMain: React.FC<{
     setView('multi-timeline');
   }, [selectedMultiIds]);
 
+  // Entering without a prior selection starts from every visible task, so the
+  // picker is useful straight away instead of requiring N checkbox clicks.
+  const handleOpenMultiView = useCallback(() => {
+    setSelectedMultiIds((prev) => (prev.length > 0 ? prev : projects.map((p) => p.id)));
+    setView('multi-timeline');
+  }, [projects]);
+
   const handleOpenMention = useCallback(async (notification: import('@syncpath/api-client').PublicMentionNotification) => {
     try {
       setSelectedWorkspaceId(notification.workspaceId);
@@ -832,6 +888,24 @@ const AppMain: React.FC<{
       onUpdated={() => setWorkspaceSettingsId(null)}
       onDeleted={() => handleWorkspaceDeleted(settingsWorkspace.id)}
     />}
+    {settingsProject && <ProjectSettingsPanel
+      key={settingsProject.id}
+      project={settingsProject}
+      canEdit={canEditSettingsProject}
+      onSave={handleSaveProjectSettings}
+      onManageMembers={() => { setSettingsProjectId(null); setMembersProjectId(settingsProject.id); }}
+      onClose={() => setSettingsProjectId(null)}
+    />}
+    {membersProject && <ProjectMembersPanel
+      key={membersProject.id}
+      projectId={membersProject.id}
+      projectName={membersProject.name}
+      currentUserId={user.id}
+      canManage={canManageMembersProject}
+      onlineUsers={membersOnlineUsers}
+      presenceConnected={membersPresenceConnected}
+      onClose={() => setMembersProjectId(null)}
+    />}
   </>;
 
   if (view === 'mentions-timeline') return <div className="sp-app-shell flex h-screen flex-col overflow-hidden">
@@ -862,6 +936,16 @@ const AppMain: React.FC<{
         logs={Object.fromEntries(
           selected.map((p) => [p.id, entriesToLogsByWeek(api.entries[p.id] ?? [])])
         )}
+        pickerTasks={projects.map((p) => ({
+          id: p.id,
+          name: p.name,
+          color: p.color,
+          workspaceId: p.workspaceId,
+          workspaceName: workspaces.find((w) => w.id === p.workspaceId)?.name ?? ''
+        }))}
+        selectedIds={selectedMultiIds}
+        onSelectionChange={setSelectedMultiIds}
+        currentUserId={user.id}
         onBack={() => setView('dashboard')}
       />
     );
@@ -887,7 +971,6 @@ const AppMain: React.FC<{
                 <button type="button" onClick={() => { setSelectedWorkspaceId(activeProject.workspaceId); setWorkspaceSettingsId(activeProject.workspaceId); }} className="max-w-[22vw] truncate rounded-md py-1 hover:text-indigo-600" title={t('Project settings')}>{activeWorkspace?.name}</button>
                 <span className="text-slate-300" aria-hidden="true">/</span>
                 <h2 className="sp-heading max-w-[28vw] truncate text-sm font-semibold">{activeProject.name}</h2>
-                <button type="button" onClick={() => setShowProjectSettings(true)} aria-label={t('Task settings')} title={t('Task settings')} className="sp-icon-button"><i className="fas fa-sliders-h text-xs" aria-hidden="true" /></button>
                 {canManageMembers && <button type="button" onClick={() => setShowTimelineHistory(true)} aria-label={t('Timeline history')} title={t('Timeline history')} className="sp-icon-button"><i className="fas fa-history text-xs" aria-hidden="true" /></button>}
               </div>
               <p className="sp-metadata mt-0.5 flex items-center gap-2 text-xs">
@@ -937,26 +1020,6 @@ const AppMain: React.FC<{
               setActiveLogDate(null);
               setActiveLogId(null);
             }}
-          />
-        )}
-        {showProjectSettings && (
-          <ProjectSettingsPanel
-            project={activeProject}
-            canEdit={canEditCards}
-            onSave={handleSaveProjectSettings}
-            onManageMembers={() => { setShowProjectSettings(false); setShowMembers(true); }}
-            onClose={() => setShowProjectSettings(false)}
-          />
-        )}
-        {showMembers && (
-          <ProjectMembersPanel
-            projectId={activeProject.id}
-            projectName={activeProject.name}
-            currentUserId={user.id}
-            onlineUsers={onlineUsers}
-            presenceConnected={collaboration.connected}
-            canManage={canManageMembers}
-            onClose={() => setShowMembers(false)}
           />
         )}
         {workspacePanels}
@@ -1109,12 +1172,14 @@ const AppMain: React.FC<{
               )
             }
             onEnterMultiView={handleEnterMultiView}
+            onOpenMultiView={handleOpenMultiView}
             onCreateProject={() => {
               if (!selectedWorkspaceId && workspaces.length > 0) {
                 setSelectedWorkspaceId(workspaces[0].id);
               }
               setView('project-form');
             }}
+            onOpenTaskSettings={(id) => setSettingsProjectId(id)}
             selectedMultiIds={selectedMultiIds}
           />
         {view === 'project-form' && activeWorkspace && (
@@ -1144,7 +1209,9 @@ const Dashboard: React.FC<{
   onSelectProject: (id: string) => void;
   onToggleMultiSelect: (id: string) => void;
   onEnterMultiView: () => void;
+  onOpenMultiView: () => void;
   onCreateProject: () => void;
+  onOpenTaskSettings: (projectId: string) => void;
 }> = ({
   workspaces,
   selectedWorkspaceId,
@@ -1153,7 +1220,9 @@ const Dashboard: React.FC<{
   onSelectProject,
   onToggleMultiSelect,
   onEnterMultiView,
-  onCreateProject
+  onOpenMultiView,
+  onCreateProject,
+  onOpenTaskSettings
 }) => {
   const { t } = useI18n();
   const visibleProjects = projects;
@@ -1183,14 +1252,15 @@ const Dashboard: React.FC<{
           <span className="sp-metadata text-xs tabular-nums">{visibleProjects.length}</span>
         </div>
         <div className="flex items-center gap-2">
-          {selectedMultiIds.length >= 2 && (
-            <button
-              onClick={onEnterMultiView}
-              className="sp-button-secondary px-3 text-xs font-medium"
-            >
-              {t('Compare')} ({selectedMultiIds.length})
-            </button>
-          )}
+          <button
+            onClick={onOpenMultiView}
+            className="sp-button-secondary inline-flex items-center gap-2 px-3 text-xs font-medium"
+            title={t('Stack several tasks on one page')}
+          >
+            <i className="fas fa-layer-group text-[10px]" aria-hidden="true"></i>
+            {t('Multi-View')}
+            {selectedMultiIds.length > 0 && <span className="tabular-nums">({selectedMultiIds.length})</span>}
+          </button>
           <button
             onClick={onCreateProject}
             className="sp-button-primary inline-flex items-center gap-2 px-3.5 text-xs font-medium"
@@ -1231,11 +1301,20 @@ const Dashboard: React.FC<{
                 </button>
                 <button
                   type="button"
+                  onClick={() => onOpenTaskSettings(p.id)}
+                  className="sp-task-card-settings absolute top-4 right-12 z-10 flex h-6 w-6 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400"
+                  aria-label={`${t('Task settings')} ${p.name}`}
+                  title={t('Task settings')}
+                >
+                  <i className="fas fa-cog text-[11px]" aria-hidden="true"></i>
+                </button>
+                <button
+                  type="button"
                   onClick={() => onSelectProject(p.id)}
                   className="flex min-h-[205px] w-full flex-col rounded-2xl p-5 text-left outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
                   aria-label={`${t('Open task')} ${p.name}`}
                 >
-                  <div className="mb-3 flex items-center gap-2.5 pr-7">
+                  <div className="mb-3 flex items-center gap-2.5 pr-16">
                     <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: p.color }} aria-hidden="true" />
                     <h3 className="sp-heading line-clamp-2 text-[15px] font-semibold leading-6 break-words">{p.name}</h3>
                   </div>

@@ -8,7 +8,6 @@ import { I18nProvider } from '../i18n';
 import type { WorkLog } from '../types';
 
 vi.mock('html2canvas', () => ({ default: vi.fn() }));
-vi.mock('./MermaidPreview', () => ({ default: () => null }));
 
 const logs: Record<string, WorkLog[]> = {
   '2026-10-12': [{

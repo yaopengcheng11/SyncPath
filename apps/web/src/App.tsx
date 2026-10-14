@@ -566,13 +566,6 @@ export const App: React.FC = () => {
     });
   };
 
-  const handleUpdateProject = (id: string, updates: Partial<Project>) => {
-    modifyState(prev => ({
-      ...prev,
-      projects: prev.projects.map(p => p.id === id ? { ...p, ...updates, updatedAt: Date.now() } : p)
-    }));
-  };
-
   const handleSelectProject = (id: string) => {
     setState(prev => ({ ...prev, selectedProjectId: id, view: 'timeline' }));
   };
@@ -1136,7 +1129,6 @@ export const App: React.FC = () => {
             onSelectDate={handleSelectDate}
             onMoveLogs={handleMoveLogs}
             onCopyLogs={handleCopyLogs}
-            onUpdateProject={(updates) => handleUpdateProject(activeProject.id, updates)}
             onDeleteLogs={handleDeleteLogs}
             onToggleLock={handleToggleLock}
             onPasteLogs={handlePasteLogs}

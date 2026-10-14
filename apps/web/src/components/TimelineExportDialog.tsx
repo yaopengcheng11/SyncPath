@@ -1,8 +1,7 @@
 import React, { useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { LogLevel, Project, WorkLog } from '../types';
 import { useI18n } from '../i18n';
-import { buildMermaidTimeline, mermaidFilename } from '../utils/mermaidTimeline';
-import MermaidPreview from './MermaidPreview';
+import { buildGanttTimeline, ganttFilename } from '../utils/ganttTimeline';
 
 interface TimelineExportDialogProps {
   open: boolean;
@@ -21,12 +20,10 @@ const TimelineExportDialog: React.FC<TimelineExportDialogProps> = ({
   open, project, logs, visibleLevels, background, onBackgroundChange, exporting, error, onExportPng, onClose
 }) => {
   const { t, locale } = useI18n();
-  const [tab, setTab] = useState<'image' | 'mermaid'>('image');
+  const [tab, setTab] = useState<'image' | 'gantt'>('image');
   const [actionBusy, setActionBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [copyMessage, setCopyMessage] = useState<string | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
-  const codeRef = useRef<HTMLTextAreaElement>(null);
   const pendingRef = useRef(false);
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
@@ -36,22 +33,16 @@ const TimelineExportDialog: React.FC<TimelineExportDialogProps> = ({
   const titleId = useId();
   const scopeId = useId();
   const imageTabId = useId();
-  const mermaidTabId = useId();
+  const ganttTabId = useId();
   const imagePanelId = useId();
-  const mermaidPanelId = useId();
-  const codeId = useId();
-  const output = useMemo(() => buildMermaidTimeline(project, logs, { locale, visibleLevels }), [project, logs, locale, visibleLevels]);
-  const currentCodeRef = useRef(output.code);
-  currentCodeRef.current = output.code;
+  const ganttPanelId = useId();
+  const output = useMemo(() => buildGanttTimeline(project, logs, { locale, visibleLevels }), [project, logs, locale, visibleLevels]);
   const empty = output.cardCount === 0;
-
-  useEffect(() => { setCopyMessage(null); }, [output.code]);
 
   useEffect(() => {
     if (!open) return;
     setTab('image');
     setActionError(null);
-    setCopyMessage(null);
     const previousFocus = document.activeElement as HTMLElement | null;
     dialogRef.current?.focus();
     const keydown = (event: KeyboardEvent): void => {
@@ -101,41 +92,20 @@ const TimelineExportDialog: React.FC<TimelineExportDialogProps> = ({
     }
   };
 
-  const copyCode = async (): Promise<void> => {
-    if (empty || busyRef.current || pendingRef.current) return;
-    const source = output.code;
-    pendingRef.current = true;
-    setActionBusy(true);
-    setActionError(null);
-    setCopyMessage(null);
-    try {
-      if (!navigator.clipboard?.writeText) throw new Error('Clipboard unavailable');
-      await navigator.clipboard.writeText(source);
-      setCopyMessage(t(currentCodeRef.current === source ? 'Code copied' : 'The timeline changed. Copy the latest code again.'));
-    } catch {
-      codeRef.current?.focus();
-      codeRef.current?.select();
-      setCopyMessage(t('Code selected. Press Ctrl+C or ⌘C to copy.'));
-    } finally {
-      pendingRef.current = false;
-      setActionBusy(false);
-    }
-  };
-
-  const downloadCode = (): void => {
+  const downloadChart = (): void => {
     if (empty || busyRef.current || pendingRef.current) return;
     setActionError(null);
     let url: string | undefined;
     try {
-      url = URL.createObjectURL(new Blob([output.code], { type: 'text/plain;charset=utf-8' }));
+      url = URL.createObjectURL(new Blob([output.html], { type: 'text/html;charset=utf-8' }));
       const link = document.createElement('a');
       link.href = url;
-      link.download = mermaidFilename(project.name);
+      link.download = ganttFilename(project.name);
       document.body.appendChild(link);
       link.click();
       link.remove();
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : t('Unable to download Mermaid. Please try again.'));
+      setActionError(err instanceof Error ? err.message : t('Unable to download the chart. Please try again.'));
     } finally {
       if (url) {
         const revoke = URL.revokeObjectURL.bind(URL);
@@ -163,8 +133,8 @@ const TimelineExportDialog: React.FC<TimelineExportDialogProps> = ({
         </header>
         <div className="min-h-0 flex-1 overflow-y-auto px-6 py-5 sm:px-8">
           <div role="tablist" aria-label={t('Export format')} className="mb-5 flex w-fit gap-1 rounded-xl border border-slate-200 bg-slate-50 p-1">
-            <button id={imageTabId} type="button" role="tab" aria-selected={tab === 'image'} aria-controls={imagePanelId} disabled={busy} onClick={() => { setTab('image'); setCopyMessage(null); }} className={`rounded-lg px-5 py-2 text-sm font-semibold disabled:opacity-40 ${tab === 'image' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>{t('Image')}</button>
-            <button id={mermaidTabId} type="button" role="tab" aria-selected={tab === 'mermaid'} aria-controls={mermaidPanelId} disabled={busy} onClick={() => setTab('mermaid')} className={`rounded-lg px-5 py-2 text-sm font-semibold disabled:opacity-40 ${tab === 'mermaid' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>Mermaid</button>
+            <button id={imageTabId} type="button" role="tab" aria-selected={tab === 'image'} aria-controls={imagePanelId} disabled={busy} onClick={() => setTab('image')} className={`rounded-lg px-5 py-2 text-sm font-semibold disabled:opacity-40 ${tab === 'image' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>{t('Image')}</button>
+            <button id={ganttTabId} type="button" role="tab" aria-selected={tab === 'gantt'} aria-controls={ganttPanelId} disabled={busy} onClick={() => setTab('gantt')} className={`rounded-lg px-5 py-2 text-sm font-semibold disabled:opacity-40 ${tab === 'gantt' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}>{t('Gantt')}</button>
           </div>
           {empty && <p className="mb-5 rounded-xl bg-slate-50 px-4 py-3 text-sm text-slate-500">{t('No visible cards in the current view.')}</p>}
           {tab === 'image' ? (
@@ -178,10 +148,13 @@ const TimelineExportDialog: React.FC<TimelineExportDialogProps> = ({
               <button type="button" disabled={busy || empty} onClick={() => void exportPng()} className="rounded-xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-40">{busy ? t('Processing...') : t('Download PNG')}</button>
             </section>
           ) : (
-            <section id={mermaidPanelId} role="tabpanel" aria-labelledby={mermaidTabId}>
-              <div className="mb-5 overflow-hidden rounded-xl border border-slate-200 bg-slate-50"><MermaidPreview code={output.code} empty={empty} /></div>
-              <label htmlFor={codeId} className="mb-2 block text-xs font-semibold text-slate-600">{t('Mermaid code')}</label>
-              <textarea ref={codeRef} id={codeId} readOnly spellCheck={false} value={output.code} className="h-32 w-full resize-y select-text rounded-xl border border-slate-200 bg-slate-50 p-4 font-mono text-xs leading-5 text-slate-700 outline-none focus:border-slate-400" />
+            <section id={ganttPanelId} role="tabpanel" aria-labelledby={ganttTabId}>
+              <p className="mb-4 text-sm leading-6 text-slate-500">{t('Download the chart as a standalone HTML file that opens in any browser.')}</p>
+              {!empty && (
+                <div className="mb-5 max-h-[28rem] overflow-auto rounded-xl border border-slate-200 bg-slate-100 p-3">
+                  <div role="img" aria-label={t('Timeline chart preview')} dangerouslySetInnerHTML={{ __html: output.svg }} />
+                </div>
+              )}
             </section>
           )}
         </div>
@@ -189,13 +162,9 @@ const TimelineExportDialog: React.FC<TimelineExportDialogProps> = ({
           {(error || actionError) && <p role="alert" className="mb-3 rounded-xl bg-red-50 px-4 py-3 text-sm text-red-700">{error || actionError}</p>}
           <div className="flex flex-wrap items-end justify-between gap-3">
             <div className="min-w-0">
-              {tab === 'mermaid' && <>
-                <div className="flex flex-wrap gap-3">
-                  <button type="button" disabled={busy || empty} onClick={() => void copyCode()} className="rounded-xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-40">{actionBusy ? t('Copying…') : t('Copy code')}</button>
-                  <button type="button" disabled={busy || empty} onClick={downloadCode} className="rounded-xl border border-slate-200 px-5 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-40">{t('Download .mmd')}</button>
-                </div>
-                {copyMessage && <p role="status" className="mt-3 text-xs text-slate-500">{copyMessage}</p>}
-              </>}
+              {tab === 'gantt' && (
+                <button type="button" disabled={busy || empty} onClick={downloadChart} className="rounded-xl bg-slate-900 px-5 py-3 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-40">{t('Download .html')}</button>
+              )}
             </div>
             <button type="button" disabled={busy} onClick={close} className="shrink-0 rounded-xl border border-slate-200 px-5 py-2.5 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40">{t('Close')}</button>
           </div>
